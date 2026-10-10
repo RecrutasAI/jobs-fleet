@@ -1,0 +1,74 @@
+name: Fleet run
+
+# Manual for now: read every board in the registry, then merge into the dataset.
+# Scrape jobs only produce files (artifacts); the single merge job is the only
+# writer to the dataset and commits the whole run at once (ADR 0004).
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Parallel scrape jobs"
+        default: "4"
+      dry_run:
+        description: "Merge without writing to the dataset"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-run   # never two runs writing at once
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.p.outputs.shards }}
+    steps:
+      - id: p
+        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards }}')))))")" >> "$GITHUB_OUTPUT"
+
+  scrape:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards }} --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: out/
+          retention-days: 7
+
+  merge:
+    needs: scrape
+    if: ${{ !cancelled() }}   # merge whatever shards finished; failed boards keep their jobs open
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          path: in/
+      - name: Merge
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET: ${{ vars.HF_DATASET }}
+        run: python -m fleet.cli merge --in in/ ${{ inputs.dry_run && '--dry-run' || '' }}
