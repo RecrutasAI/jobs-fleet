@@ -70,3 +70,39 @@ def test_other_boards_are_untouched():
     s1 = run({}, BoardRead(B, True, {"a": job("a")}), BoardRead(other, True, {"z": job("z")}), now="t1").state
     r = run(s1, BoardRead(B, True, {}), now="t2")  # only acme was read this run
     assert r.state["z"]["closed_at"] is None
+
+
+def _hash(row):
+    return "|".join(str(row.get(k)) for k in ("title", "description", "location"))
+
+
+def jobd(jid, **kw):
+    r = {"job_id": jid, "title": "Eng", "description": "Build", "location": "Austin, TX"} | kw
+    r["content_hash"] = _hash(r)
+    return r
+
+
+def test_a_field_missing_on_one_read_is_not_a_change_and_is_kept():
+    s1 = merge({}, [BoardRead(B, True, {"a": jobd("a")})], "t1", rehash=_hash).state
+    r = merge(s1, [BoardRead(B, True, {"a": jobd("a", description=None)})], "t2", rehash=_hash)
+    assert r.events == [] and r.state["a"]["description"] == "Build"
+
+
+def test_workday_location_summary_does_not_erase_the_real_location():
+    s1 = merge({}, [BoardRead(B, True, {"a": jobd("a")})], "t1", rehash=_hash).state
+    r = merge(s1, [BoardRead(B, True, {"a": jobd("a", location="2 Locations")})], "t2", rehash=_hash)
+    assert r.events == [] and r.state["a"]["location"] == "Austin, TX"
+
+
+def test_a_real_difference_is_still_a_change():
+    s1 = merge({}, [BoardRead(B, True, {"a": jobd("a")})], "t1", rehash=_hash).state
+    r = merge(s1, [BoardRead(B, True, {"a": jobd("a", description="Build and lead")})], "t2", rehash=_hash)
+    assert [e["event"] for e in r.events] == ["changed"] and r.state["a"]["description"] == "Build and lead"
+
+
+def test_carried_location_brings_its_country_along():
+    s1 = merge({}, [BoardRead(B, True, {"a": jobd("a", country_iso="US", is_us=True, us_state="TX")})], "t1", rehash=_hash).state
+    r = merge(s1, [BoardRead(B, True, {"a": jobd("a", location="2 Locations", country_iso=None, is_us=False, us_state=None)})],
+              "t2", rehash=_hash)
+    a = r.state["a"]
+    assert (a["location"], a["country_iso"], a["is_us"], a["us_state"]) == ("Austin, TX", "US", True, "TX")

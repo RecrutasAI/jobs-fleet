@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import registry, store
 from .history import BoardRead, merge
+from .rows import content_hash
 
 
 def cmd_scrape(args: argparse.Namespace) -> int:
@@ -51,7 +52,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
                        jobs=by_board.get(run["board_id"], {}), error=run["error"]) for run in runs]
 
     previous = store.load_state(Path(args.state) if args.state else None)
-    result = merge(previous, reads, now)
+    result = merge(previous, reads, now, rehash=content_hash)
     for run in runs:
         run["suspect_empty"] = run["board_id"] in result.suspect_boards
 

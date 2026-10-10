@@ -6,9 +6,40 @@ keeps the board's jobs open and is flagged instead.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
-SUSPECT_EMPTY_MIN = 5  # a board that had at least this many open jobs and now returns 0 is suspect
+SUSPECT_EMPTY_MIN = 5
+
+# Fields a scraper sometimes leaves empty on one run and fills on the next (Workday skipped
+# 852 descriptions on one run, 2026-10-10). Missing data never erases known data.
+CARRY_FIELDS = ("description", "location", "salary_summary", "salary_min", "salary_max", "employment_type",
+                "department", "team", "posted_at", "apply_url")
+LOCATION_DERIVED = ("countries", "country_iso", "us_state", "city", "is_us")
+PLACEHOLDER_LOCATION = re.compile(r"^\s*\d+\s+locations?\s*$", re.IGNORECASE)  # Workday's "2 Locations"
+
+
+def _missing(field_name: str, value) -> bool:
+    if value is None or value == "":
+        return True
+    return field_name == "location" and isinstance(value, str) and bool(PLACEHOLDER_LOCATION.match(value))
+
+
+def fill_from_prior(row: dict, prior: dict, rehash) -> dict:
+    """Keep known values where this read came back empty, then recompute the content hash."""
+    filled = dict(row)
+    touched = False
+    for f in CARRY_FIELDS:
+        if _missing(f, filled.get(f)) and not _missing(f, prior.get(f)):
+            filled[f] = prior[f]
+            touched = True
+            if f == "location":  # the place derived from it comes along
+                for d in LOCATION_DERIVED:
+                    if d in prior:
+                        filled[d] = prior[d]
+    if touched and rehash is not None:
+        filled["content_hash"] = rehash(filled)
+    return filled  # a board that had at least this many open jobs and now returns 0 is suspect
 
 
 @dataclass
@@ -26,7 +57,7 @@ class MergeResult:
     suspect_boards: list[str] = field(default_factory=list)
 
 
-def merge(previous: dict[str, dict], reads: list[BoardRead], now: str) -> MergeResult:
+def merge(previous: dict[str, dict], reads: list[BoardRead], now: str, rehash=None) -> MergeResult:
     """Fold one run's board reads into the previous state.
 
     previous: job_id -> {board_id, first_seen, last_seen, closed_at, content_hash, ...}
@@ -56,6 +87,7 @@ def merge(previous: dict[str, dict], reads: list[BoardRead], now: str) -> MergeR
                               "last_seen": now, "closed_at": None}
                 events.append({"event": kind, "job_id": jid, "board_id": read.board_id, "at": now})
             else:
+                row = fill_from_prior(row, prior, rehash)
                 changed = prior.get("content_hash") != row.get("content_hash")
                 state[jid] = {**row, "board_id": read.board_id, "first_seen": prior["first_seen"],
                               "last_seen": now, "closed_at": None}
