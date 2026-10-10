@@ -1,6 +1,6 @@
 # jobs-fleet
 
-An open, daily-updated dataset of **US jobs read directly from company career pages**
+Open-source pipeline that reads **US jobs directly from company career pages**
 (Greenhouse, Lever, Ashby, Workday, iCIMS, Oracle, Paycom and more). No job boards,
 no reposters: every job links to the employer's own posting.
 
@@ -15,7 +15,8 @@ the registry grows from here. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## The data
 
-[`recrutas/us-jobs`](https://huggingface.co/datasets/recrutas/us-jobs) on Hugging Face:
+The jobs are stored in a **private** Hugging Face dataset, `recrutas/us-jobs`, read by
+[Recrutas](https://www.recrutas.ai). The code here is open; the data is not published.
 
 | Path | What |
 |---|---|
@@ -26,19 +27,6 @@ the registry grows from here. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Every job carries its source URL, fetch time, scraper version and collection method, plus
 `country_iso`, `us_state`, `city`, `is_remote` and `is_us` derived from the location text.
-
-```sql
--- DuckDB
-SELECT company_name, title, city, us_state, url
-FROM 'hf://datasets/recrutas/us-jobs/state/jobs.parquet'
-WHERE closed_at IS NULL AND is_us;
-```
-
-| Piece | Where |
-|---|---|
-| Code | this repo (MIT) |
-| Compute | GitHub Actions (`.github/workflows/`) |
-| Data | Hugging Face dataset [`recrutas/us-jobs`](https://huggingface.co/datasets/recrutas/us-jobs) (empty until the first run) |
 
 ## Check the setup
 
@@ -52,4 +40,4 @@ removed, open an issue with the company name and we'll take them out.
 
 ## License
 
-Code: MIT. Dataset license to be set before the first data release.
+Code: MIT. The job data is private.

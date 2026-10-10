@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jobs-fleet"
 version = "0.0.1"
-description = "Open, daily-updated dataset of US jobs read directly from company career pages."
+description = "Open-source pipeline that reads US jobs directly from company career pages."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
