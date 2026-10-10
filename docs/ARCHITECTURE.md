@@ -7,7 +7,7 @@ provenance, the worker contract) are fixed now; the services around them are
 swappable.
 
 ```
-registry/boards.csv          what to read (versioned, reviewable, PR-able)
+registry/boards.csv          what to read (private dataset; read every 1-3 days by size)
         │  deterministic sharding (hash of board_id)
         ▼
 scrape workers (N in parallel)   one container image; input = a shard of boards,
@@ -24,8 +24,8 @@ dataset (Parquet)            state/ · snapshots/ · events/ · runs/
 
 | Concern | Today ($0) | Later (same contracts) |
 |---|---|---|
-| Registry | `registry/boards.csv` in this repo | Postgres control plane |
-| Scheduling | GitHub Actions matrix, sharded by `board_id` hash | Work queue + adaptive scheduler |
+| Registry | `registry/boards.csv` in the private dataset | Postgres control plane |
+| Scheduling | GitHub Actions matrix, sharded by `board_id` hash; cadence by board size | Work queue + adaptive scheduler |
 | Workers | GitHub Actions runners (+ self-hosted) | Kubernetes / Cloud Run jobs |
 | Storage | Parquet on Hugging Face `recrutas/us-jobs` | Iceberg on object storage (R2/S3) |
 | Query | DuckDB (`hf://` paths) | Trino / Snowflake / BigQuery |

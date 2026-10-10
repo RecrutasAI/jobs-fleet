@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 from pathlib import Path
 
 BASE = "https://storage.stapply.ai/jobhive/v1"
-REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "boards.csv"
+REGISTRY = Path(os.environ.get("FLEET_REGISTRY") or Path(__file__).resolve().parent.parent / "registry" / "boards.csv")
 FIELDS = ["ats", "slug", "name", "careers_url", "priority", "enabled"]
 
 

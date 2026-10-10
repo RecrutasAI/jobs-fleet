@@ -3,3 +3,6 @@ in/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+
+# The registry lives in the private dataset (registry/README.md)
+registry/boards.csv
