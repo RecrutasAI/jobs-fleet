@@ -20,6 +20,11 @@ def _default_registry() -> Path:
 REGISTRY = _default_registry()
 COLUMNS = ["ats", "slug", "name", "careers_url", "priority", "enabled"]
 
+# Systems whose ats-scrapers scraper takes the career page URL rather than a short id
+# (Workday: https://{co}.wdN.myworkdayjobs.com/{site}; Oracle: the oraclecloud.com site;
+# SuccessFactors: the recruiting host or legacy career URL). Identity still uses the slug.
+URL_INPUT_ATS = frozenset({"workday", "oracle", "successfactors"})
+
 
 @dataclass(frozen=True)
 class Board:
@@ -33,6 +38,11 @@ class Board:
     @property
     def id(self) -> str:
         return board_id(self.ats, self.slug)
+
+    @property
+    def scraper_input(self) -> str:
+        """What to hand the ats-scrapers scraper for this board."""
+        return self.careers_url if self.ats in URL_INPUT_ATS and self.careers_url else self.slug
 
 
 def load(path: Path = REGISTRY) -> list[Board]:

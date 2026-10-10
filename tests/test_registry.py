@@ -25,3 +25,11 @@ def test_duplicates_and_disabled_boards(tmp_path: Path):
     boards = registry.load(f)
     assert [b.name for b in boards] == ["Acme", "Beta"]
     assert registry.shard(boards, 0, 1) == [boards[0]]
+
+
+def test_url_input_systems_get_the_career_page_but_keep_slug_identity():
+    wd = registry.Board("workday", "ngc/ext", "NGC", "https://ngc.wd1.myworkdayjobs.com/ext")
+    gh = registry.Board("greenhouse", "stripe", "Stripe", "https://job-boards.greenhouse.io/stripe")
+    assert wd.scraper_input == "https://ngc.wd1.myworkdayjobs.com/ext"
+    assert gh.scraper_input == "stripe"
+    assert wd.id == "workday:ngc/ext"

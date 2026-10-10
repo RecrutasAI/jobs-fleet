@@ -26,7 +26,7 @@ async def read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tupl
     rows: list[dict] = []
     async with sem:
         try:
-            scraper = get_scraper(board.ats, board.slug)
+            scraper = get_scraper(board.ats, board.scraper_input)
             jobs = await asyncio.wait_for(scraper.afetch(), timeout=BOARD_TIMEOUT_S)
             fetched = _now()
             seen: set[str] = set()
