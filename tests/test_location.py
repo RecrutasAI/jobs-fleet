@@ -39,6 +39,15 @@ CASES = [
     ("United Kingdom", ("GB", None, None, False, False)),
     ("Remote", (None, None, None, True, False)),
     ("San Diego", (None, None, "San Diego", False, False)),   # city only: unknown stays unknown
+    # Workday writes the country first (2026-10-10 strings)
+    ("USA - PA - Oaks", ("US", "PA", "Oaks", False, True)),
+    ("USA-Colorado-Fort Collins-4380 Ziegler Road", ("US", "CO", "Fort Collins", False, True)),
+    ("USA-CA San Jose Innovation Drive", ("US", "CA", "San Jose Innovation Drive", False, True)),
+    ("IND-Bangalore Electronic City - S1", ("IN", None, "Bangalore Electronic City", False, False)),
+    ("IRL - Dublin", ("IE", None, "Dublin", False, False)),
+    ("India - Bangalore", ("IN", None, "Bangalore", False, False)),
+    ("Orlando area", (None, None, "Orlando area", False, False)),   # no country in the text: unknown
+    ("2 Locations", (None, None, "2 Locations", False, False)),     # Workday summary: unknown
 ]
 
 

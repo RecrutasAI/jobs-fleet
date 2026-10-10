@@ -50,6 +50,16 @@ COUNTRIES = {
 }
 ISO2 = set(COUNTRIES.values())
 
+# Three-letter codes, which Workday puts FIRST ("USA - PA - Oaks", "IND-Bangalore", "IRL - Dublin").
+ISO3 = {
+    "USA": "US", "CAN": "CA", "MEX": "MX", "GBR": "GB", "IRL": "IE", "IND": "IN", "DEU": "DE", "FRA": "FR",
+    "ESP": "ES", "PRT": "PT", "ITA": "IT", "NLD": "NL", "BEL": "BE", "CHE": "CH", "AUT": "AT", "SWE": "SE",
+    "NOR": "NO", "DNK": "DK", "FIN": "FI", "POL": "PL", "ROU": "RO", "CZE": "CZ", "HUN": "HU", "SRB": "RS",
+    "ISR": "IL", "BRA": "BR", "ARG": "AR", "COL": "CO", "CHL": "CL", "CRI": "CR", "PER": "PE", "PHL": "PH",
+    "SGP": "SG", "MYS": "MY", "CHN": "CN", "JPN": "JP", "KOR": "KR", "TWN": "TW", "AUS": "AU", "NZL": "NZ",
+    "ZAF": "ZA", "ARE": "AE", "SAU": "SA", "EGY": "EG", "MAR": "MA", "TUN": "TN", "TUR": "TR", "UKR": "UA",
+}
+
 POSTAL = re.compile(r"^(\d{5}(-\d{4})?|[A-Z]\d[A-Z] ?\d[A-Z]\d|\d{4,6})$", re.IGNORECASE)
 REMOTE = re.compile(r"\b(remote|anywhere|work from home|wfh|telecommute|distributed)\b", re.IGNORECASE)
 SEGMENT_SPLIT = re.compile(r"\s*[;|]\s*")
@@ -95,6 +105,27 @@ def _segment(text: str) -> tuple[Place, bool]:
     place = Place()
     if not parts:
         return place, remote
+
+    # 0. Country written FIRST (Workday): "USA - PA - Oaks", "USA-Colorado-Fort Collins-…",
+    #    "IND-Bangalore Electronic City", "India - Bangalore". Split on bare dashes too.
+    head = re.match(r"^\s*([A-Za-z][A-Za-z .]*?)\s*-\s*(.+)$", text)
+    if head:
+        first = head.group(1).strip()
+        lead = ISO3.get(first.upper()) if len(first) == 3 and first.isupper() else COUNTRIES.get(first.lower())
+        if lead:
+            rest = [t.strip() for t in re.split(r"\s*-\s*", head.group(2)) if t.strip()]
+            rest = [t for t in rest if not POSTAL.match(t) and not re.match(r"^\d+\s", t)]  # drop street addresses
+            place = Place(country=lead)
+            if lead == "US" and rest:
+                words = rest[0].split()
+                if rest[0].lower() in STATE_BY_NAME:
+                    place.state, rest = STATE_BY_NAME[rest[0].lower()], rest[1:]
+                elif words and words[0] in US_STATES:
+                    place.state = words[0]
+                    rest = ([" ".join(words[1:])] if len(words) > 1 else []) + rest[1:]
+            if rest:
+                place.city = rest[0]
+            return place, remote
 
     # 1. Explicit country at the end (allowing "Michigan USA" written without a comma).
     last = parts[-1]
