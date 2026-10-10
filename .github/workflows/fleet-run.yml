@@ -11,7 +11,7 @@ on:
     inputs:
       shards:
         description: "Parallel scrape jobs"
-        default: "4"
+        default: "20"
       dry_run:
         description: "Merge without writing to the dataset"
         type: boolean
@@ -31,7 +31,7 @@ jobs:
       shards: ${{ steps.p.outputs.shards }}
     steps:
       - id: p
-        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 4 }}')))))")" >> "$GITHUB_OUTPUT"
+        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 20 }}')))))")" >> "$GITHUB_OUTPUT"
 
   scrape:
     needs: plan
@@ -48,7 +48,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 4 }} --out out
+      - run: python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 20 }} --out out
       - uses: actions/upload-artifact@v4
         with:
           name: shard-${{ matrix.shard }}

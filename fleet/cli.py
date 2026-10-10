@@ -35,6 +35,9 @@ def cmd_scrape(args: argparse.Namespace) -> int:
     return 0
 
 
+SNAPSHOT_DROP = frozenset({"description"})
+
+
 def cmd_merge(args: argparse.Namespace) -> int:
     src = Path(args.inp)
     rows = [r for f in sorted(src.rglob("rows-*.parquet")) for r in store.read_parquet(f)]
@@ -65,7 +68,10 @@ def cmd_merge(args: argparse.Namespace) -> int:
         f"runs/date={day}/{stamp}.parquet": out / "runs.parquet",
     }
     store.write_parquet(list(result.state.values()), files[store.STATE_PATH])
-    store.write_parquet(rows, files[f"snapshots/date={day}/{stamp}.parquet"])
+    # Snapshots are slim (no descriptions): the full text lives in state, and changes are
+    # events. Keeps daily storage small at thousands of boards.
+    store.write_parquet([{k: v for k, v in r.items() if k not in SNAPSHOT_DROP} for r in rows],
+                        files[f"snapshots/date={day}/{stamp}.parquet"])
     store.write_parquet(result.events, files[f"events/date={day}/{stamp}.parquet"], schema=store.EVENT_SCHEMA)
     store.write_parquet(runs, files[f"runs/date={day}/{stamp}.parquet"])
 

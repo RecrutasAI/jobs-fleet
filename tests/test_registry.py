@@ -3,10 +3,10 @@ from pathlib import Path
 from fleet import registry
 
 
-def test_seed_registry_loads_100_unique_boards():
+def test_registry_loads_unique_boards():
     boards = registry.load()
-    assert len(boards) == 100
-    assert len({b.id for b in boards}) == 100
+    assert len(boards) >= 100
+    assert len({b.id for b in boards}) == len(boards)
     assert all(b.careers_url.startswith("https://") for b in boards)
 
 
