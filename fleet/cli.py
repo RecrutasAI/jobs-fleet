@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import registry, store
-from .history import BoardRead, merge
+from .bigmerge import merge_run
 from .rows import content_hash
 
 
@@ -35,12 +35,9 @@ def cmd_scrape(args: argparse.Namespace) -> int:
     return 0
 
 
-SNAPSHOT_DROP = frozenset({"description"})
-
-
 def cmd_merge(args: argparse.Namespace) -> int:
     src = Path(args.inp)
-    rows = [r for f in sorted(src.rglob("rows-*.parquet")) for r in store.read_parquet(f)]
+    row_files = sorted(src.rglob("rows-*.parquet"))
     runs = [r for f in sorted(src.rglob("runs-*.parquet")) for r in store.read_parquet(f)]
     if not runs:
         print("no run records found; nothing to merge")
@@ -48,41 +45,32 @@ def cmd_merge(args: argparse.Namespace) -> int:
     now = datetime.now(UTC).replace(microsecond=0).isoformat()
     day = now[:10]
 
-    by_board: dict[str, dict[str, dict]] = {}
-    for r in rows:
-        by_board.setdefault(r["board_id"], {})[r["job_id"]] = r
-    reads = [BoardRead(board_id=run["board_id"], ok=run["status"] == "ok",
-                       jobs=by_board.get(run["board_id"], {}), error=run["error"]) for run in runs]
-
-    previous = store.load_state(Path(args.state) if args.state else None)
-    result = merge(previous, reads, now, rehash=content_hash)
-    for run in runs:
-        run["suspect_empty"] = run["board_id"] in result.suspect_boards
-
     out = store.tmpdir()
+    state_file = Path(args.state) if args.state else store.state_file()
+    result = merge_run(row_files, runs, state_file, now, content_hash, out)
+    for run in runs:
+        run["suspect_empty"] = run["board_id"] in result["suspect_boards"]
+
     stamp = now.replace(":", "")
+    # Snapshots are slim (no descriptions): the full text lives in state, and changes are
+    # events. Keeps daily storage small at thousands of boards.
     files = {
         store.STATE_PATH: out / "state.parquet",
         f"snapshots/date={day}/{stamp}.parquet": out / "snapshot.parquet",
         f"events/date={day}/{stamp}.parquet": out / "events.parquet",
         f"runs/date={day}/{stamp}.parquet": out / "runs.parquet",
     }
-    store.write_parquet(list(result.state.values()), files[store.STATE_PATH])
-    # Snapshots are slim (no descriptions): the full text lives in state, and changes are
-    # events. Keeps daily storage small at thousands of boards.
-    store.write_parquet([{k: v for k, v in r.items() if k not in SNAPSHOT_DROP} for r in rows],
-                        files[f"snapshots/date={day}/{stamp}.parquet"])
-    store.write_parquet(result.events, files[f"events/date={day}/{stamp}.parquet"], schema=store.EVENT_SCHEMA)
+    files = {dest: path for dest, path in files.items() if path.exists() or path.name == "runs.parquet"}
     store.write_parquet(runs, files[f"runs/date={day}/{stamp}.parquet"])
 
-    open_jobs = sum(1 for s in result.state.values() if s.get("closed_at") is None)
+    open_jobs = result["open_jobs"]
     summary = {
         "boards": len(runs), "boards_ok": sum(r["status"] == "ok" for r in runs),
         "boards_failed": sum(r["status"] == "error" for r in runs),
-        "boards_unavailable": sum(r["status"] == "unavailable" for r in runs), "suspect_empty": result.suspect_boards,
-        "us_open_jobs": sum(1 for s in result.state.values() if s.get("closed_at") is None and s.get("is_us")),
-        "jobs_read": len(rows), "open_jobs": open_jobs,
-        "events": dict(Counter(e["event"] for e in result.events)),
+        "boards_unavailable": sum(r["status"] == "unavailable" for r in runs),
+        "suspect_empty": result["suspect_boards"],
+        "us_open_jobs": result["us_open_jobs"], "jobs_read": result["jobs_read"], "open_jobs": open_jobs,
+        "events": dict(Counter(e["event"] for e in result["events"])),
     }
     print(json.dumps(summary, indent=2))
     if args.dry_run:

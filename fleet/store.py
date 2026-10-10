@@ -41,6 +41,16 @@ def load_state(local: Path | None = None) -> dict[str, dict]:
     return {r["job_id"]: r for r in rows}
 
 
+def state_file() -> Path | None:
+    """The dataset's current state file, downloaded; None on the first run."""
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
+    try:
+        return Path(hf_hub_download(DATASET, STATE_PATH, repo_type="dataset"))
+    except EntryNotFoundError:
+        return None
+
+
 def commit_run(files: dict[str, Path], message: str) -> str:
     """Upload every file for a run in ONE commit, so readers never see half a run."""
     from huggingface_hub import CommitOperationAdd, HfApi
