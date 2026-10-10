@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from .registry import Board
 from .rows import to_row
 
-BOARD_TIMEOUT_S = 600   # one slow board can't hold a shard hostage
+BOARD_TIMEOUT_S = 1800  # big boards (Domino's, ~25K jobs) need ~10+ min; still bounded so one board can't hold a shard hostage
 CONCURRENCY = 6         # boards read at once per worker (each board is a different site)
 
 
