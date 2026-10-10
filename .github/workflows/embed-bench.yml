@@ -1,0 +1,29 @@
+name: Matcher benchmark
+
+# Measurement only, by hand: how long job vectors and matching take on a runner.
+# Prints timings; writes nothing. See tools/embed_bench.py.
+on:
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "Jobs to embed"
+        default: "20000"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q onnxruntime tokenizers numpy duckdb huggingface_hub
+      - name: Benchmark
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET: ${{ vars.HF_DATASET || 'recrutas/us-jobs' }}
+        run: python tools/embed_bench.py --sample ${{ inputs.sample }}
