@@ -22,8 +22,6 @@ def check(name: str, fn) -> None:
 
 
 def python_version() -> str:
-    if sys.version_info < (3, 11):
-        raise RuntimeError(f"needs Python 3.11+, have {sys.version.split()[0]}")
     return sys.version.split()[0]
 
 

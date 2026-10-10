@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata as md
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .registry import Board
 from .rows import to_row
@@ -14,7 +14,7 @@ CONCURRENCY = 6         # boards read at once per worker (each board is a differ
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 async def read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tuple[list[dict], dict]:
@@ -40,7 +40,7 @@ async def read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tupl
                     seen.add(row["job_id"])
                     rows.append(row)
             run["jobs"] = len(rows)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             run.update(status="error", error=f"timed out after {BOARD_TIMEOUT_S}s")
         except Exception as err:  # noqa: BLE001 - every failure becomes a run record, never a crash
             run.update(status="error", error=f"{type(err).__name__}: {err}"[:500])

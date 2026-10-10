@@ -9,7 +9,7 @@ import argparse
 import asyncio
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import registry, store
@@ -41,7 +41,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if not runs:
         print("no run records found; nothing to merge")
         return 1
-    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
     day = now[:10]
 
     by_board: dict[str, dict[str, dict]] = {}

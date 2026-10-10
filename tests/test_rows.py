@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from fleet.rows import ROW_FIELDS, collection_method, to_row
@@ -13,9 +13,9 @@ class CloakScraper:
 
 
 def fake_job(**kw):
-    base = dict(url="https://job-boards.greenhouse.io/acme/jobs/1?gh_src=x", title="Engineer", company="Acme",
-                ats_id="1", location="Austin, TX", country_iso="US", posted_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
-                description="Build things")
+    base = {"url": "https://job-boards.greenhouse.io/acme/jobs/1?gh_src=x", "title": "Engineer", "company": "Acme",
+                "ats_id": "1", "location": "Austin, TX", "country_iso": "US", "posted_at": datetime(2026, 10, 1, tzinfo=UTC),
+                "description": "Build things"}
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -30,7 +30,7 @@ def test_row_has_every_field_and_provenance():
 
 
 def test_content_hash_changes_only_with_content():
-    kw = dict(ats="greenhouse", slug="acme", board="greenhouse:acme", scraper=FakeScraper(), scraper_version="v")
+    kw = {"ats": "greenhouse", "slug": "acme", "board": "greenhouse:acme", "scraper": FakeScraper(), "scraper_version": "v"}
     a = to_row(fake_job(), fetched_at="t1", **kw)
     b = to_row(fake_job(), fetched_at="t2", **kw)
     c = to_row(fake_job(title="Senior Engineer"), fetched_at="t2", **kw)

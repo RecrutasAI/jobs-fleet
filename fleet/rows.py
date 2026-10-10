@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .ids import canonical_url, job_id
@@ -36,7 +36,7 @@ def _s(v: Any) -> str | None:
     if v is None:
         return None
     if isinstance(v, datetime):
-        return (v if v.tzinfo else v.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+        return (v if v.tzinfo else v.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
     return str(getattr(v, "value", v))
 
 

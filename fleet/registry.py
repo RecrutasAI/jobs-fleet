@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .ids import board_id, shard_of
 
+
 def _default_registry() -> Path:
     """FLEET_REGISTRY, else ./registry/boards.csv (Docker, CI), else next to the source tree."""
     if os.environ.get("FLEET_REGISTRY"):
