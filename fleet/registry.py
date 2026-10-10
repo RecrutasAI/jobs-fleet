@@ -22,8 +22,9 @@ COLUMNS = ["ats", "slug", "name", "careers_url", "priority", "enabled"]
 
 # Systems whose ats-scrapers scraper takes the career page URL rather than a short id
 # (Workday: https://{co}.wdN.myworkdayjobs.com/{site}; Oracle: the oraclecloud.com site;
-# SuccessFactors: the recruiting host or legacy career URL). Identity still uses the slug.
-URL_INPUT_ATS = frozenset({"workday", "oracle", "successfactors"})
+# SuccessFactors: the recruiting host or legacy career URL; Keka: the *.keka.com/careers page;
+# Recruitee: the career site, which may be a custom domain). Identity still uses the slug.
+URL_INPUT_ATS = frozenset({"workday", "oracle", "successfactors", "keka", "recruitee"})
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,8 @@
 """Add US companies from the ats-scrapers company directory to registry/boards.csv.
 
 Takes only the companies list (name, id, career page URL), never their job data. A company
-counts as US when the ats-scrapers dataset shows at least one current US job for it. New
+counts as US when the ats-scrapers dataset shows at least one current US job for it, matched by
+its id or, where the id is opaque (Paycom's portal hashes), by its name within the same system. New
 boards are appended; existing ones (same board_id) are left untouched.
 
     pip install duckdb
@@ -26,14 +27,16 @@ def us_companies(ats: list[str], min_us_jobs: int) -> list[dict]:
     norm = "regexp_replace(lower({}), '[^a-z0-9]', '', 'g')"
     return [dict(zip(["ats", "slug", "name", "careers_url", "us_jobs"], r)) for r in con.execute(f"""
         WITH dir AS (
-            SELECT ats, slug, name, url, {norm.format("split_part(slug, '/', 1)")} AS k FROM read_parquet('{BASE}/companies.parquet')
+            SELECT ats, slug, name, url, {norm.format("split_part(slug, '/', 1)")} AS k,
+                   {norm.format("name")} AS nk FROM read_parquet('{BASE}/companies.parquet')
             WHERE ats IN ({systems})),
         us AS (
             SELECT ats_type AS ats, {norm.format("company")} AS k, count(*) AS us_jobs
             FROM read_parquet('{BASE}/all.parquet')
             WHERE ats_type IN ({systems}) AND country_iso = 'US' GROUP BY 1, 2)
-        SELECT d.ats, d.slug, d.name, d.url, u.us_jobs FROM dir d JOIN us u USING (ats, k)
-        WHERE u.us_jobs >= {min_us_jobs} ORDER BY d.ats, u.us_jobs DESC""").fetchall()]
+        SELECT d.ats, d.slug, d.name, d.url, max(u.us_jobs) AS us_jobs
+        FROM dir d JOIN us u ON u.ats = d.ats AND (u.k = d.k OR u.k = d.nk)
+        WHERE u.us_jobs >= {min_us_jobs} GROUP BY 1, 2, 3, 4 ORDER BY d.ats, us_jobs DESC""").fetchall()]
 
 
 def main() -> int:

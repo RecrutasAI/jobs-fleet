@@ -6,6 +6,7 @@ import importlib.metadata as md
 import time
 from datetime import UTC, datetime
 
+from .patches import get_scraper
 from .registry import Board
 from .rows import to_row
 
@@ -45,8 +46,6 @@ def _now() -> str:
 
 
 async def read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tuple[list[dict], dict]:
-    from ats_scrapers.scrapers import get_scraper  # imported here so pure modules test without it
-
     started = time.monotonic()
     run = {"board_id": board.id, "ats": board.ats, "slug": board.slug, "started_at": _now(),
            "status": "ok", "jobs": 0, "error": None, "duration_s": 0.0, "scraper_version": version}
