@@ -1,7 +1,10 @@
 """Command line: `scrape` a shard, then `merge` all shards into the dataset.
 
-    python -m fleet.cli scrape --shard 0 --of 4 --out out/
-    python -m fleet.cli merge --in out/ [--dry-run]
+    python -m fleet.cli scrape --shard 0 --of 4 --out out/ [--all]
+    python -m fleet.cli merge --in out/ [--registry boards.csv] [--dry-run]
+
+The registry is private (FLEET_REGISTRY points at a local copy). Logs are public, so they
+carry counts only: board names and errors stay in the run records in the dataset.
 """
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ import argparse
 import asyncio
 import json
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from . import registry, store
@@ -19,20 +22,31 @@ from .rows import content_hash
 
 def cmd_scrape(args: argparse.Namespace) -> int:
     from .scrape import read_boards
-    boards = registry.shard(registry.load(), args.shard, args.of)
+    day = None if args.all else (date.fromisoformat(args.day) if args.day else datetime.now(UTC).date())
+    boards = registry.shard(registry.load(), args.shard, args.of, day)
     if args.limit:
         boards = boards[: args.limit]
-    print(f"shard {args.shard}/{args.of}: {len(boards)} boards")
+    print(f"shard {args.shard}/{args.of}: {len(boards)} boards due {day or '(all)'}")
     rows, runs = asyncio.run(read_boards(boards))
     out = Path(args.out)
     store.write_parquet(rows, out / f"rows-{args.shard:03d}.parquet")
     store.write_parquet(runs, out / f"runs-{args.shard:03d}.parquet")
     status = Counter(r["status"] for r in runs)
     print(f"shard {args.shard}: {len(rows)} jobs · boards {dict(status)}")
-    for r in runs:
-        if r["status"] != "ok":
-            print(f"  ! {r['board_id']}: {r['error']}")
+    kinds = Counter(f"{r['ats']}: {_error_kind(r['error'])}" for r in runs if r["status"] != "ok")
+    for kind, n in kinds.most_common():
+        print(f"  ! {n} × {kind}")
     return 0
+
+
+def _error_kind(error: str | None) -> str:
+    """The exception name only; the message can carry a board's URL or name."""
+    if (error or "").startswith("timed out"):
+        return "timeout"
+    if (error or "").startswith("site down for maintenance"):
+        return "maintenance"
+    head = (error or "unknown").split(":", 1)[0].strip()
+    return head if head.replace("_", "").replace(".", "").isalnum() and len(head) <= 60 else "error"
 
 
 def cmd_merge(args: argparse.Namespace) -> int:
@@ -62,15 +76,20 @@ def cmd_merge(args: argparse.Namespace) -> int:
     }
     files = {dest: path for dest, path in files.items() if path.exists() or path.name == "runs.parquet"}
     store.write_parquet(runs, files[f"runs/date={day}/{stamp}.parquet"])
+    reprioritized = None
+    if args.registry:
+        reprioritized = registry.reprioritize(Path(args.registry), runs)
+        files[registry.DATASET_PATH] = Path(args.registry)
 
     open_jobs = result["open_jobs"]
     summary = {
         "boards": len(runs), "boards_ok": sum(r["status"] == "ok" for r in runs),
         "boards_failed": sum(r["status"] == "error" for r in runs),
         "boards_unavailable": sum(r["status"] == "unavailable" for r in runs),
-        "suspect_empty": result["suspect_boards"],
+        "suspect_empty": len(result["suspect_boards"]),
         "us_open_jobs": result["us_open_jobs"], "jobs_read": result["jobs_read"], "open_jobs": open_jobs,
         "events": dict(Counter(e["event"] for e in result["events"])),
+        "priorities_changed": reprioritized,
     }
     print(json.dumps(summary, indent=2))
     if args.dry_run:
@@ -90,9 +109,12 @@ def main() -> int:
     s.add_argument("--of", type=int, required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--limit", type=int, default=0)
+    s.add_argument("--day", help="read the boards due on this UTC day (default: today)")
+    s.add_argument("--all", action="store_true", help="read every board, whatever its cadence")
     m = sub.add_parser("merge")
     m.add_argument("--in", dest="inp", required=True)
     m.add_argument("--state", help="local previous state (tests / dry runs)")
+    m.add_argument("--registry", help="local registry: priorities are updated from this run and committed with it")
     m.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
     return cmd_scrape(args) if args.cmd == "scrape" else cmd_merge(args)

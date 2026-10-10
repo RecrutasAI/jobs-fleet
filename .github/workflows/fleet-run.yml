@@ -1,9 +1,13 @@
 name: Fleet run
 
 # Daily at 12:00 UTC (morning in the US), or by hand from the Actions tab.
-# Reads every board in the registry, then merges into the dataset.
-# Scrape jobs only produce files (artifacts); the single merge job is the only
-# writer to the dataset and commits the whole run at once (ADR 0004).
+# Reads the boards due today (big boards daily, smaller ones every 2-3 days; ADR 0005),
+# then merges into the dataset. Scrape jobs only produce files; the single merge job is
+# the only writer to the dataset and commits the whole run at once (ADR 0004).
+#
+# This repo is public, so its logs and artifacts are too. The registry and the scraped
+# jobs live in the private dataset: files passed between jobs are encrypted with
+# FLEET_ARTIFACT_KEY, kept for a day, and logs carry counts only.
 on:
   schedule:
     - cron: "0 12 * * *"
@@ -12,6 +16,10 @@ on:
       shards:
         description: "Parallel scrape jobs"
         default: "20"
+      all_boards:
+        description: "Read every board, not just the ones due today"
+        type: boolean
+        default: false
       dry_run:
         description: "Merge without writing to the dataset"
         type: boolean
@@ -24,6 +32,9 @@ concurrency:
   group: fleet-run   # never two runs writing at once
   cancel-in-progress: false
 
+env:
+  HF_DATASET: ${{ vars.HF_DATASET || 'recrutas/us-jobs' }}
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -32,6 +43,22 @@ jobs:
     steps:
       - id: p
         run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 20 }}')))))")" >> "$GITHUB_OUTPUT"
+      - run: pip install -q huggingface_hub
+      - name: Fetch the private registry
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_ARTIFACT_KEY" || { echo "FLEET_ARTIFACT_KEY secret is missing"; exit 1; }
+          python3 -c "from huggingface_hub import hf_hub_download as d; import shutil, os; shutil.copy(d(os.environ['HF_DATASET'], 'registry/boards.csv', repo_type='dataset'), 'boards.csv')"
+          echo "$(($(wc -l < boards.csv) - 1)) boards in the registry"
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:FLEET_ARTIFACT_KEY -in boards.csv -out registry.enc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry
+          path: registry.enc
+          retention-days: 1
 
   scrape:
     needs: plan
@@ -48,12 +75,23 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 20 }} --out out
+      - uses: actions/download-artifact@v4
+        with:
+          name: registry
+      - name: Scrape
+        env:
+          FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
+          FLEET_REGISTRY: ${{ runner.temp }}/boards.csv
+        run: |
+          set -euo pipefail
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in registry.enc -out "$FLEET_REGISTRY"
+          python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 20 }} --out out ${{ inputs.all_boards && '--all' || '' }}
+          tar -C out -czf - . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:FLEET_ARTIFACT_KEY -out shard.enc
       - uses: actions/upload-artifact@v4
         with:
           name: shard-${{ matrix.shard }}
-          path: out/
-          retention-days: 7
+          path: shard.enc
+          retention-days: 1
 
   merge:
     needs: scrape
@@ -69,9 +107,18 @@ jobs:
       - run: pip install -e .
       - uses: actions/download-artifact@v4
         with:
-          path: in/
+          path: enc/
+      - name: Decrypt
+        env:
+          FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
+        run: |
+          set -euo pipefail
+          openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in enc/registry/registry.enc -out "$RUNNER_TEMP/boards.csv"
+          for f in enc/shard-*/shard.enc; do
+            d="in/$(basename "$(dirname "$f")")"; mkdir -p "$d"
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in "$f" | tar -C "$d" -xzf -
+          done
       - name: Merge
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET: ${{ vars.HF_DATASET }}
-        run: python -m fleet.cli merge --in in/ ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python -m fleet.cli merge --in in/ --registry "$RUNNER_TEMP/boards.csv" ${{ inputs.dry_run && '--dry-run' || '' }}

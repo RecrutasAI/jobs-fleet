@@ -1,12 +1,23 @@
-"""The board registry: registry/boards.csv (ADR 0005)."""
+"""The board registry: boards.csv, kept in the private dataset (ADR 0005).
+
+Boards are read on a cadence set by their size: big boards hold most jobs and change
+daily, while small ones take most of the run time and rarely change (2026-10-10 run:
+boards under 20 jobs were 62% of read time and 5% of jobs).
+"""
 from __future__ import annotations
 
 import csv
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from .ids import board_id, shard_of
+
+DATASET_PATH = "registry/boards.csv"  # where the registry lives in the private dataset
+
+# priority -> read every N days
+CADENCE = {1: 1, 2: 2, 3: 3}
 
 
 def _default_registry() -> Path:
@@ -64,7 +75,49 @@ def load(path: Path = REGISTRY) -> list[Board]:
     return list(boards.values())
 
 
-def shard(boards: list[Board], index: int, of: int) -> list[Board]:
+def shard(boards: list[Board], index: int, of: int, day: date | None = None) -> list[Board]:
+    """This shard's enabled boards; with `day`, only the boards due that day."""
     if not 0 <= index < of:
         raise ValueError(f"shard index {index} out of range for {of} shards")
-    return [b for b in boards if b.enabled and shard_of(b.id, of) == index]
+    return [b for b in boards if b.enabled and shard_of(b.id, of) == index and (day is None or due(b, day))]
+
+
+def due(board: Board, day: date) -> bool:
+    """Whether a board is read on `day`. Each board gets a fixed offset, so the boards of
+    one cadence are spread evenly over its days instead of all landing on the same one."""
+    every = CADENCE.get(board.priority, 1)
+    return (day.toordinal() + shard_of(board.id, every)) % every == 0
+
+
+def priority_for(open_jobs: int) -> int:
+    return 1 if open_jobs >= 100 else 2 if open_jobs >= 20 else 3
+
+
+def reprioritize(path: Path, runs: list[dict]) -> int:
+    """Set each board's priority from this run's job count. Only clean reads count: a failed
+    or suspect-empty read keeps the board's current priority. Returns how many changed."""
+    counts = {r["board_id"]: int(r.get("jobs") or 0) for r in runs
+              if r.get("status") == "ok" and not r.get("suspect_empty")}
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or COLUMNS
+        rows = list(reader)
+    changed = 0
+    for row in rows:
+        if not row.get("ats") or not row.get("slug"):
+            continue
+        jobs = counts.get(board_id(row["ats"], row["slug"]))
+        if jobs is None:
+            continue
+        new = str(priority_for(jobs))
+        if (row.get("priority") or "2").strip() != new:
+            row["priority"] = new
+            changed += 1
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(path)
+    return changed
+
