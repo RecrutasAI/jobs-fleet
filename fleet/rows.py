@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .ids import canonical_url, job_id
+from .location import parse as parse_location
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2 (2026-10-10): + countries, us_state, city, is_us; country_iso and is_remote filled from location text
 
 # Collection method per source, from how each ats-scrapers scraper fetches (ADR 0001/0006).
 STEALTH_BROWSER = frozenset({"meta", "tesla", "uber", "darwinbox", "builtin", "infojobs_es"})
@@ -17,6 +18,7 @@ ROW_FIELDS = [
     "job_id", "board_id", "ats", "slug", "company_name", "ats_job_id", "title", "url", "apply_url",
     "location", "country_iso", "region", "is_remote", "employment_type", "department", "team",
     "requisition_id", "salary_min", "salary_max", "salary_currency", "salary_period", "salary_summary",
+    "countries", "us_state", "city", "is_us",
     "description", "posted_at", "fetched_at", "content_hash",
     "scraper", "scraper_version", "collection_method", "schema_version",
 ]
@@ -79,5 +81,19 @@ def to_row(job: Any, *, ats: str, slug: str, board: str, scraper: Any, scraper_v
         "collection_method": collection_method(ats, scraper),
         "schema_version": SCHEMA_VERSION,
     }
+    # Normalization step 1: the scrapers rarely fill the country, so derive it from the
+    # location text. Not part of content_hash: adding these fields is not a posting change.
+    loc = parse_location(row["location"], row["is_remote"])
+    countries = list(loc.countries)
+    if row["country_iso"] and row["country_iso"].upper() not in countries:
+        countries.insert(0, row["country_iso"].upper())
+    row.update(
+        countries="|".join(countries) or None,
+        country_iso=(row["country_iso"] or loc.country_iso),
+        us_state=loc.us_state,
+        city=loc.city,
+        is_remote=bool(row["is_remote"]) or loc.is_remote,
+        is_us="US" in countries,
+    )
     row["content_hash"] = content_hash(row)
     return row

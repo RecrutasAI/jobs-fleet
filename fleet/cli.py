@@ -71,7 +71,9 @@ def cmd_merge(args: argparse.Namespace) -> int:
     open_jobs = sum(1 for s in result.state.values() if s.get("closed_at") is None)
     summary = {
         "boards": len(runs), "boards_ok": sum(r["status"] == "ok" for r in runs),
-        "boards_failed": sum(r["status"] != "ok" for r in runs), "suspect_empty": result.suspect_boards,
+        "boards_failed": sum(r["status"] == "error" for r in runs),
+        "boards_unavailable": sum(r["status"] == "unavailable" for r in runs), "suspect_empty": result.suspect_boards,
+        "us_open_jobs": sum(1 for s in result.state.values() if s.get("closed_at") is None and s.get("is_us")),
         "jobs_read": len(rows), "open_jobs": open_jobs,
         "events": dict(Counter(e["event"] for e in result.events)),
     }
