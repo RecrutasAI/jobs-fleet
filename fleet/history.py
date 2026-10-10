@@ -25,6 +25,19 @@ def _missing(field_name: str, value) -> bool:
     return field_name == "location" and isinstance(value, str) and bool(PLACEHOLDER_LOCATION.match(value))
 
 
+# The fields that make up a posting's content (rows.content_hash hashes the same ones).
+CONTENT_FIELDS = ("title", "location", "apply_url", "salary_summary", "employment_type", "description")
+
+
+def really_changed(prior: dict, row: dict) -> bool:
+    """A change is a difference between two KNOWN values. A field filled in for the first
+    time (Workday adding a description it skipped before) is new information, not a change."""
+    if prior.get("content_hash") == row.get("content_hash"):
+        return False
+    return any(not _missing(f, prior.get(f)) and not _missing(f, row.get(f)) and prior.get(f) != row.get(f)
+               for f in CONTENT_FIELDS)
+
+
 def fill_from_prior(row: dict, prior: dict, rehash) -> dict:
     """Keep known values where this read came back empty, then recompute the content hash."""
     filled = dict(row)
@@ -88,7 +101,7 @@ def merge(previous: dict[str, dict], reads: list[BoardRead], now: str, rehash=No
                 events.append({"event": kind, "job_id": jid, "board_id": read.board_id, "at": now})
             else:
                 row = fill_from_prior(row, prior, rehash)
-                changed = prior.get("content_hash") != row.get("content_hash")
+                changed = really_changed(prior, row)
                 state[jid] = {**row, "board_id": read.board_id, "first_seen": prior["first_seen"],
                               "last_seen": now, "closed_at": None}
                 if changed:

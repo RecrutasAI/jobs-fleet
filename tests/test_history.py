@@ -25,8 +25,8 @@ def test_unchanged_job_keeps_first_seen_and_emits_nothing():
 
 
 def test_changed_content_emits_changed():
-    s1 = run({}, BoardRead(B, True, {"a": job("a", "h1")}), now="t1").state
-    r = run(s1, BoardRead(B, True, {"a": job("a", "h2")}), now="t2")
+    s1 = run({}, BoardRead(B, True, {"a": {**job("a", "h1"), "title": "Engineer"}}), now="t1").state
+    r = run(s1, BoardRead(B, True, {"a": {**job("a", "h2"), "title": "Senior Engineer"}}), now="t2")
     assert [e["event"] for e in r.events] == ["changed"]
 
 
@@ -106,3 +106,9 @@ def test_carried_location_brings_its_country_along():
               "t2", rehash=_hash)
     a = r.state["a"]
     assert (a["location"], a["country_iso"], a["is_us"], a["us_state"]) == ("Austin, TX", "US", True, "TX")
+
+
+def test_a_field_filled_in_for_the_first_time_is_not_a_change():
+    s1 = merge({}, [BoardRead(B, True, {"a": jobd("a", description=None)})], "t1", rehash=_hash).state
+    r = merge(s1, [BoardRead(B, True, {"a": jobd("a", description="Build")})], "t2", rehash=_hash)
+    assert r.events == [] and r.state["a"]["description"] == "Build"
