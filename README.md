@@ -15,7 +15,7 @@ Infrastructure setup. Nothing is scraped yet.
 |---|---|
 | Code | this repo (MIT) |
 | Compute | GitHub Actions (`.github/workflows/`) |
-| Data | Hugging Face dataset `RecrutasAI/us-jobs` (coming) |
+| Data | Hugging Face dataset [`recrutas/us-jobs`](https://huggingface.co/datasets/recrutas/us-jobs) (empty until the first run) |
 
 ## Check the setup
 

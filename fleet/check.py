@@ -10,7 +10,7 @@ import importlib.metadata as md
 import os
 import sys
 
-DATASET = os.environ.get("HF_DATASET", "RecrutasAI/us-jobs")
+DATASET = os.environ.get("HF_DATASET", "recrutas/us-jobs")
 results: list[tuple[str, bool, str]] = []
 
 

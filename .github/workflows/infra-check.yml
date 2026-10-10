@@ -23,5 +23,5 @@ jobs:
       - name: Check
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET: ${{ vars.HF_DATASET || 'RecrutasAI/us-jobs' }}
+          HF_DATASET: ${{ vars.HF_DATASET || 'recrutas/us-jobs' }}
         run: python -m fleet.check
