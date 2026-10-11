@@ -62,3 +62,27 @@ def test_location_fields_do_not_change_the_content_hash():
     a = to_row(fake_job(country_iso=None), **kw)
     b = to_row(fake_job(country_iso="US"), **kw)
     assert a["content_hash"] == b["content_hash"]
+
+
+def test_oracle_rows_get_the_job_page_not_the_search_page():
+    from fleet.rows import oracle_job_url
+    site = "https://eigx.fa.us6.oraclecloud.com/?keyword=&lang=en&mode=jobs&site_number=CX_1"
+    assert oracle_job_url(site, "eigx.fa.us6.oraclecloud.com:52165") == \
+        "https://eigx.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/52165"
+    other = "https://edmn.fa.us2.oraclecloud.com/?mode=jobs&site_number=CX_1001"
+    assert oracle_job_url(other, "edmn.fa.us2.oraclecloud.com:9") .endswith("/sites/CX_1001/job/9")
+    page = "https://x.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/7"
+    assert oracle_job_url(page, "x:7") == page                      # already a job page
+    assert oracle_job_url(site, None) == site                       # nothing to build from
+    row = to_row(fake_job(url=site, ats_id="eigx.fa.us6.oraclecloud.com:52165"), ats="oracle", slug="eigx",
+                 board="oracle:eigx", scraper=FakeScraper(), scraper_version="v", fetched_at="t")
+    assert row["url"].endswith("/sites/CX_1/job/52165")
+
+
+def test_registry_name_wins_over_the_scrapers_slug():
+    kw = {"ats": "greenhouse", "slug": "extrahopnetworks", "board": "greenhouse:extrahopnetworks",
+          "scraper": FakeScraper(), "scraper_version": "v", "fetched_at": "t"}
+    a = to_row(fake_job(company="extrahopnetworks"), company="ExtraHop", **kw)
+    b = to_row(fake_job(company="extrahopnetworks"), **kw)
+    assert a["company_name"] == "ExtraHop" and b["company_name"] == "extrahopnetworks"
+    assert a["content_hash"] == b["content_hash"]                   # a name fix is not a posting change

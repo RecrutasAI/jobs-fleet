@@ -59,7 +59,7 @@ async def read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tupl
             for job in jobs:
                 try:
                     row = to_row(job, ats=board.ats, slug=board.slug, board=board.id,
-                                 scraper=scraper, scraper_version=version, fetched_at=fetched)
+                                 scraper=scraper, scraper_version=version, fetched_at=fetched, company=board.name)
                 except ValueError:
                     continue  # no id and no url: can't be identified, skip it
                 if row["job_id"] not in seen:
