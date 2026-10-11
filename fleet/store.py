@@ -59,5 +59,15 @@ def commit_run(files: dict[str, Path], message: str) -> str:
     return info.commit_url
 
 
+def download(path_in_repo: str) -> Path | None:
+    """A file from the dataset, or None if it doesn't exist yet."""
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
+    try:
+        return Path(hf_hub_download(DATASET, path_in_repo, repo_type="dataset"))
+    except EntryNotFoundError:
+        return None
+
+
 def tmpdir() -> Path:
     return Path(tempfile.mkdtemp(prefix="fleet-"))

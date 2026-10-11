@@ -101,6 +101,32 @@ def cmd_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_embed(args: argparse.Namespace) -> int:
+    from . import embed
+    state = Path(args.state) if args.state else store.state_file()
+    vectors = Path(args.vectors) if args.vectors else store.download(embed.VECTORS_PATH)
+    out = Path(args.out) / f"vectors-{args.shard:03d}.parquet"
+    n = embed.embed_shard(state, vectors, out, embed.load_embedder(), args.shard, args.of)
+    print(f"shard {args.shard}/{args.of}: embedded {n} new or changed jobs")
+    return 0
+
+
+def cmd_embed_combine(args: argparse.Namespace) -> int:
+    from . import embed
+    state = Path(args.state) if args.state else store.state_file()
+    vectors = Path(args.vectors) if args.vectors else store.download(embed.VECTORS_PATH)
+    shards = sorted(Path(args.inp).rglob("vectors-*.parquet"))
+    out = store.tmpdir() / "jobs.parquet"
+    summary = embed.combine(state, vectors, shards, out)
+    print(json.dumps(summary, indent=2))
+    if args.dry_run:
+        print(f"dry run: {out}")
+        return 0
+    print("committed:", store.commit_run({embed.VECTORS_PATH: out},
+                                          f"Job vectors: {summary['vectors']} ({summary['embedded_this_run']} new or changed)"))
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="fleet")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -116,8 +142,19 @@ def main() -> int:
     m.add_argument("--state", help="local previous state (tests / dry runs)")
     m.add_argument("--registry", help="local registry: priorities are updated from this run and committed with it")
     m.add_argument("--dry-run", action="store_true")
+    e = sub.add_parser("embed", help="vectors for this shard's new and changed open US jobs")
+    e.add_argument("--shard", type=int, default=0)
+    e.add_argument("--of", type=int, default=1)
+    e.add_argument("--out", required=True)
+    e.add_argument("--state", help="local state file (default: the dataset's)")
+    e.add_argument("--vectors", help="local previous vectors (default: the dataset's)")
+    c = sub.add_parser("embed-combine", help="merge shard vectors into vectors/jobs.parquet and commit")
+    c.add_argument("--in", dest="inp", required=True)
+    c.add_argument("--state")
+    c.add_argument("--vectors")
+    c.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
-    return cmd_scrape(args) if args.cmd == "scrape" else cmd_merge(args)
+    return {"scrape": cmd_scrape, "merge": cmd_merge, "embed": cmd_embed, "embed-combine": cmd_embed_combine}[args.cmd](args)
 
 
 if __name__ == "__main__":

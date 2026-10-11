@@ -1,0 +1,94 @@
+name: Job vectors
+
+# Vectors for open US jobs, after each Fleet run, so matching happens here and not on the
+# Recrutas server (ADR 0008). Only new and changed jobs are embedded; the first backfill
+# runs by hand with more shards. Like the Fleet run, files passed between jobs are
+# encrypted and kept a day, and logs carry counts only (this repo is public).
+on:
+  workflow_run:
+    workflows: ["Fleet run"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Parallel embed jobs (20 for the first backfill)"
+        default: "4"
+      dry_run:
+        description: "Combine without writing to the dataset"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-run   # one writer to the dataset at a time
+  cancel-in-progress: false
+
+env:
+  HF_DATASET: ${{ vars.HF_DATASET || 'recrutas/us-jobs' }}
+  # The jobs holding HF_TOKEN install only these, never the scraper package.
+  EMBED_DEPS: "onnxruntime==1.20.1 tokenizers==0.21.0 numpy==2.1.3 pyarrow==18.1.0 huggingface_hub==0.27.0"
+
+jobs:
+  plan:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.p.outputs.shards }}
+    steps:
+      - id: p
+        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 4 }}')))))")" >> "$GITHUB_OUTPUT"
+
+  embed:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q $EMBED_DEPS
+      - name: Embed
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
+        run: |
+          set -euo pipefail
+          python -m fleet.cli embed --shard ${{ matrix.shard }} --of ${{ inputs.shards || 4 }} --out out
+          tar -C out -czf - . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:FLEET_ARTIFACT_KEY -out vectors.enc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vectors-${{ matrix.shard }}
+          path: vectors.enc
+          retention-days: 1
+
+  combine:
+    needs: embed
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q $EMBED_DEPS
+      - uses: actions/download-artifact@v4
+        with:
+          path: enc/
+      - name: Combine and commit
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
+        run: |
+          set -euo pipefail
+          for f in enc/vectors-*/vectors.enc; do
+            d="in/$(basename "$(dirname "$f")")"; mkdir -p "$d"
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in "$f" | tar -C "$d" -xzf -
+          done
+          python -m fleet.cli embed-combine --in in/ ${{ inputs.dry_run && '--dry-run' || '' }}

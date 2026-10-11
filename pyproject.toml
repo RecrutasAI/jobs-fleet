@@ -17,7 +17,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "numpy>=1.26"]
+embed = ["onnxruntime>=1.18", "tokenizers>=0.19", "numpy>=1.26"]
 
 [tool.setuptools]
 packages = ["fleet"]
