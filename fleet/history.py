@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 SUSPECT_EMPTY_MIN = 5
 
@@ -38,6 +39,15 @@ def really_changed(prior: dict, row: dict) -> bool:
                for f in CONTENT_FIELDS)
 
 
+def _same_day_or_next(a, b) -> bool:
+    if _missing("posted_at", a) or _missing("posted_at", b) or a == b:
+        return False
+    try:
+        return abs((date.fromisoformat(str(a)[:10]) - date.fromisoformat(str(b)[:10])).days) <= 1
+    except ValueError:
+        return False
+
+
 def fill_from_prior(row: dict, prior: dict, rehash) -> dict:
     """Keep known values where this read came back empty, then recompute the content hash."""
     filled = dict(row)
@@ -50,6 +60,10 @@ def fill_from_prior(row: dict, prior: dict, rehash) -> dict:
                 for d in LOCATION_DERIVED:
                     if d in prior:
                         filled[d] = prior[d]
+    # A posting day read two ways (Workday's exact day one run, its "Posted 3 Days Ago" the next)
+    # can differ by a day across time zones. The day already published stays.
+    if _same_day_or_next(prior.get("posted_at"), filled.get("posted_at")):
+        filled["posted_at"] = prior["posted_at"]
     if touched and rehash is not None:
         filled["content_hash"] = rehash(filled)
     return filled  # a board that had at least this many open jobs and now returns 0 is suspect

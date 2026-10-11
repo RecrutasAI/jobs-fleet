@@ -23,7 +23,7 @@ from .ids import shard_of
 MODEL = "Xenova/bge-small-en-v1.5"
 DIM = 384
 VECTORS_PATH = "vectors/jobs.parquet"
-STATE_COLUMNS = ["job_id", "content_hash", "title", "company_name", "description", "closed_at", "is_us"]
+STATE_COLUMNS = ["job_id", "content_hash", "title", "company_name", "description", "closed_at", "is_us", "duplicate_of"]
 SCHEMA = pa.schema([("job_id", pa.string()), ("content_hash", pa.string()), ("vector", pa.list_(pa.float16(), DIM))])
 
 Embedder = Callable[[list[str]], np.ndarray]
@@ -72,13 +72,23 @@ def known_hashes(vectors: Path | None) -> dict[str, str]:
     return dict(zip(t.column("job_id").to_pylist(), t.column("content_hash").to_pylist()))
 
 
+def _present(state: Path, cols: list[str]) -> list[str]:
+    """The columns this state file has (duplicate_of arrived 2026-10-11)."""
+    names = set(pq.read_schema(state).names)
+    return [c for c in cols if c in names]
+
+
 def _open_us(t: pa.Table) -> pa.Table:
-    return t.filter(pc.and_(pc.is_null(t.column("closed_at")), pc.fill_null(pc.equal(t.column("is_us"), True), False)))
+    """Open US jobs, one copy each (rows marked duplicate_of repeat another board's job)."""
+    keep = pc.and_(pc.is_null(t.column("closed_at")), pc.fill_null(pc.equal(t.column("is_us"), True), False))
+    if "duplicate_of" in t.column_names:
+        keep = pc.and_(keep, pc.is_null(t.column("duplicate_of")))
+    return t.filter(keep)
 
 
 def todo(state: Path, known: dict[str, str], shard: int = 0, of: int = 1) -> Iterable[tuple[str, str, str]]:
     """(job_id, content_hash, text) for open US jobs in this shard that are new or changed."""
-    for batch in pq.ParquetFile(state).iter_batches(batch_size=20_000, columns=STATE_COLUMNS):
+    for batch in pq.ParquetFile(state).iter_batches(batch_size=20_000, columns=_present(state, STATE_COLUMNS)):
         t = _open_us(pa.Table.from_batches([batch]))
         cols = (t.column(c).to_pylist() for c in ("job_id", "content_hash", "title", "company_name", "description"))
         for jid, h, title, company, desc in zip(*cols):
@@ -122,7 +132,7 @@ def embed_shard(state: Path, vectors: Path | None, out: Path, embed: Embedder, s
 def combine(state: Path, vectors: Path | None, shard_files: list[Path], out: Path) -> dict:
     """Previous vectors + this run's shards, keeping only jobs that are open and US now, at their current content."""
     open_now: dict[str, str] = {}
-    for batch in pq.ParquetFile(state).iter_batches(batch_size=100_000, columns=["job_id", "content_hash", "closed_at", "is_us"]):
+    for batch in pq.ParquetFile(state).iter_batches(batch_size=100_000, columns=_present(state, ["job_id", "content_hash", "closed_at", "is_us", "duplicate_of"])):
         t = _open_us(pa.Table.from_batches([batch]))
         open_now.update(zip(t.column("job_id").to_pylist(), t.column("content_hash").to_pylist()))
 

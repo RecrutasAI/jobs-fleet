@@ -112,3 +112,11 @@ def test_a_field_filled_in_for_the_first_time_is_not_a_change():
     s1 = merge({}, [BoardRead(B, True, {"a": jobd("a", description=None)})], "t1", rehash=_hash).state
     r = merge(s1, [BoardRead(B, True, {"a": jobd("a", description="Build")})], "t2", rehash=_hash)
     assert r.events == [] and r.state["a"]["description"] == "Build"
+
+
+def test_published_posting_day_stays_when_read_a_day_apart():
+    from fleet.history import fill_from_prior
+    prior = {"posted_at": "2026-10-08T00:00:00+00:00"}
+    assert fill_from_prior({"posted_at": "2026-10-09T00:00:00+00:00"}, prior, None)["posted_at"] == prior["posted_at"]
+    assert fill_from_prior({"posted_at": None}, prior, None)["posted_at"] == prior["posted_at"]
+    assert fill_from_prior({"posted_at": "2026-10-01T00:00:00+00:00"}, prior, None)["posted_at"].startswith("2026-10-01")  # reposted

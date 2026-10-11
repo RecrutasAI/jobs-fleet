@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -53,12 +54,13 @@ def oracle_job_url(url: str | None, ats_job_id: str | None) -> str | None:
     """The job's own page on Oracle Recruiting Cloud. The scraper gives every job the career-site
     search page (`/?mode=jobs&site_number=CX_1`), which isn't a link to the job. The id is the
     part of ats_job_id after the host ("eigx.fa.us6.oraclecloud.com:52165"). Checked 2026-10-11:
-    the page opens and Oracle's job-details API returns the same title for the id."""
+    the page opens and Oracle's job-details API returns the same title for the id. Ids can be codes
+    too ("DCC035", "REQ2500019G"): the details API finds those the same way (checked 2026-10-11)."""
     if not url or not ats_job_id or "/job/" in url:
         return url
     parts = urlsplit(url)
     job = ats_job_id.rsplit(":", 1)[-1].strip()
-    if not parts.netloc or not job.isdigit():
+    if not parts.netloc or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", job):
         return url
     site = dict(parse_qsl(parts.query)).get("site_number") or "CX_1"
     return f"https://{parts.netloc}/hcmUI/CandidateExperience/en/sites/{site}/job/{job}"
@@ -117,3 +119,25 @@ def to_row(job: Any, *, ats: str, slug: str, board: str, scraper: Any, scraper_v
     )
     row["content_hash"] = content_hash(row)
     return row
+
+
+UNNAMED = re.compile(r"oraclecloud\.com|saasfaprod", re.IGNORECASE)
+
+
+def repair(row: dict, names: dict[str, str] | None = None) -> dict:
+    """Bring a stored row up to today's rules. Boards are read every 1-3 days and some reads fail,
+    so a fix made in to_row would otherwise reach their jobs late or never.
+
+    Oracle: the job's own link instead of the career-site search page. Names: the registry's name
+    for the board; an Oracle board the registry can't name shows its host, so it stays unnamed.
+    """
+    out = dict(row)
+    if out.get("ats") == "oracle":
+        out["url"] = canonical_url(oracle_job_url(out.get("url"), out.get("ats_job_id"))) or out.get("url")
+    if names is not None and out.get("board_id") in names:
+        name = names[out["board_id"]]
+        if name:
+            out["company_name"] = name
+        elif out.get("ats") == "oracle":
+            out["company_name"] = urlsplit(out.get("url") or "").netloc or out.get("company_name")
+    return out

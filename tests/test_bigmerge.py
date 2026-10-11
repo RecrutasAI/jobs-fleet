@@ -56,7 +56,8 @@ def test_group_merge_equals_all_at_once(tmp_path):
     got = merge_run(sorted((tmp_path / "in").glob("rows-*.parquet")), runs, tmp_path / "prev.parquet", T1,
                     rehash, out, groups=7)
 
-    state = {r["job_id"]: r for r in pq.read_table(out / "state.parquet").to_pylist()}
+    state = {r["job_id"]: {k: v for k, v in r.items() if k != "duplicate_of"}
+             for r in pq.read_table(out / "state.parquet").to_pylist()}
     assert state == expected.state
     key = lambda e: (e["job_id"], e["event"])
     assert sorted(got["events"], key=key) == sorted(expected.events, key=key)
@@ -79,3 +80,31 @@ def test_first_run_without_state(tmp_path):
     state = pq.read_table(out / "state.parquet").to_pylist()
     assert len(state) == 3 and all(s["first_seen"] == T1 and s["closed_at"] is None for s in state)
     assert got["open_jobs"] == 3 and got["us_open_jobs"] == 3
+
+
+def test_marks_the_same_job_from_two_boards_once(tmp_path):
+    from fleet.bigmerge import mark_duplicates
+
+    def row(jid, board, aid, url, title="Nurse", co="Acme Foods", closed=None, ats="oracle"):
+        return {"job_id": jid, "board_id": board, "ats": ats, "ats_job_id": aid, "url": url, "title": title,
+                "company_name": co, "closed_at": closed, "is_us": True}
+    rows = [
+        row("a1", "oracle:acme", "acme.fa.us2.oraclecloud.com:7", "https://acme/sites/CX_1/job/7", co="acme.fa.us2.oraclecloud.com"),
+        row("a2", "oracle:acme/cx_2001", "acme.fa.us2.oraclecloud.com:7", "https://acme/sites/CX_2001/job/7"),
+        row("a3", "oracle:acme/cx_2001", "acme.fa.us2.oraclecloud.com:8", "https://acme/sites/CX_2001/job/8"),
+        # one board giving every job its career page: different jobs, not duplicates
+        row("b1", "icims:x", "1", "https://x.com/careers", title="Cook", ats="icims"),
+        row("b2", "icims:x", "2", "https://x.com/careers", title="Cook", ats="icims"),
+        # the same link and title on two boards: one job
+        row("c1", "workday:y/a", "R1", "https://y.wd1/job/1", title="Analyst", co="Y", ats="workday"),
+        row("c2", "workday:y/b", "R1", "https://y.wd1/job/1", title="Analyst", co="Y", ats="workday"),
+        # a closed copy is never the kept one and never marked
+        row("d1", "oracle:acme", "acme.fa.us2.oraclecloud.com:9", "u9", closed="2026-10-01"),
+        row("d2", "oracle:acme/cx_2001", "acme.fa.us2.oraclecloud.com:9", "u9b"),
+    ]
+    write_parquet(rows, tmp_path / "state.parquet")
+    got = mark_duplicates(tmp_path / "state.parquet")
+    marks = {r["job_id"]: r["duplicate_of"] for r in pq.read_table(tmp_path / "state.parquet").to_pylist()}
+    assert marks == {"a1": "a2", "a2": None, "a3": None, "b1": None, "b2": None, "c1": None, "c2": "c1",
+                     "d1": None, "d2": None}                       # the named board's copy is kept
+    assert got == {"duplicates": 2, "us_duplicates": 2}

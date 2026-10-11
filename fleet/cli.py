@@ -61,7 +61,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
 
     out = store.tmpdir()
     state_file = Path(args.state) if args.state else store.state_file()
-    result = merge_run(row_files, runs, state_file, now, content_hash, out)
+    names = {b.id: b.name for b in registry.load(Path(args.registry))} if args.registry else None
+    result = merge_run(row_files, runs, state_file, now, content_hash, out, names=names)
     for run in runs:
         run["suspect_empty"] = run["board_id"] in result["suspect_boards"]
 
@@ -88,6 +89,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
         "boards_unavailable": sum(r["status"] == "unavailable" for r in runs),
         "suspect_empty": len(result["suspect_boards"]),
         "us_open_jobs": result["us_open_jobs"], "jobs_read": result["jobs_read"], "open_jobs": open_jobs,
+        "duplicates_marked": result.get("duplicates", 0),
         "events": dict(Counter(e["event"] for e in result["events"])),
         "priorities_changed": reprioritized,
     }
