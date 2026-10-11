@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 
 DATASET = os.environ.get("HF_DATASET", "recrutas/us-jobs")
 STATE_PATH = "state/jobs.parquet"
-STATE_EXTRA = ["first_seen", "last_seen", "closed_at"]
+STATE_EXTRA = ["first_seen", "last_seen", "closed_at", "duplicate_of"]
 
 
 EVENT_SCHEMA = pa.schema([("event", pa.string()), ("job_id", pa.string()), ("board_id", pa.string()), ("at", pa.string())])

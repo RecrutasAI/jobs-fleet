@@ -86,3 +86,23 @@ def test_registry_name_wins_over_the_scrapers_slug():
     b = to_row(fake_job(company="extrahopnetworks"), **kw)
     assert a["company_name"] == "ExtraHop" and b["company_name"] == "extrahopnetworks"
     assert a["content_hash"] == b["content_hash"]                   # a name fix is not a posting change
+
+
+def test_oracle_job_link_from_a_code_id():
+    from fleet.rows import oracle_job_url
+    site = "https://eigx.fa.us6.oraclecloud.com/?keyword=&lang=en&mode=jobs&site_number=CX_1"
+    assert oracle_job_url(site, "eigx.fa.us6.oraclecloud.com:DCC035").endswith("/sites/CX_1/job/DCC035")
+    assert oracle_job_url(site, "hdhl.fa.us6.oraclecloud.com:REQ2500019G").endswith("/job/REQ2500019G")
+    assert oracle_job_url(site, "x:has space") == site
+
+
+def test_repair_fixes_stored_rows():
+    from fleet.rows import repair
+    old = {"ats": "oracle", "board_id": "oracle:eigx", "ats_job_id": "eigx.fa.us6.oraclecloud.com:302",
+           "url": "https://eigx.fa.us6.oraclecloud.com/?keyword=&lang=en&mode=jobs&site_number=CX_1", "company_name": "Eigx"}
+    fixed = repair(old, {"oracle:eigx": "Acme Beauty"})
+    assert fixed["url"] == "https://eigx.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/302"
+    assert fixed["company_name"] == "Acme Beauty"
+    assert repair(old, {"oracle:eigx": ""})["company_name"] == "eigx.fa.us6.oraclecloud.com"   # unnamed stays unnamed
+    gh = {"ats": "greenhouse", "board_id": "greenhouse:a", "url": "https://x/1", "company_name": "A"}
+    assert repair(gh, {}) == gh

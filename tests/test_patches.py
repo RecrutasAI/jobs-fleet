@@ -29,3 +29,17 @@ def test_html_falls_back_to_upstream_parser():
 
 def test_empty_board():
     assert parse_bamboohr_widget('{"departments": []}', "x") == []
+
+
+def test_workday_posting_day():
+    from datetime import date
+
+    from fleet.patches import workday_posted_at
+    today = date(2026, 10, 11)
+    assert workday_posted_at("2026-08-19", "Posted 30+ Days Ago", today).date() == date(2026, 8, 19)
+    assert workday_posted_at(None, "Posted Today", today).date() == today
+    assert workday_posted_at(None, "Posted Yesterday", today).date() == date(2026, 10, 10)
+    assert workday_posted_at(None, "Posted 3 Days Ago", today).date() == date(2026, 10, 8)
+    assert workday_posted_at(None, "Posted 30+ Days Ago", today) is None      # not a date
+    assert workday_posted_at(None, None, today) is None
+    assert workday_posted_at("garbage", "Posted 2 Days Ago", today).date() == date(2026, 10, 9)

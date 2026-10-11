@@ -17,6 +17,7 @@ import pyarrow.parquet as pq
 
 from .history import BoardRead, merge
 from .ids import shard_of
+from .rows import UNNAMED, repair
 from .store import EVENT_SCHEMA, STATE_EXTRA
 
 GROUPS = 16
@@ -72,7 +73,7 @@ def _conform(table: pa.Table, schema: pa.Schema) -> pa.Table:
 
 
 def merge_run(row_files: list[Path], runs: list[dict], state_file: Path | None, now: str, rehash,
-              out: Path, groups: int = GROUPS) -> dict:
+              out: Path, groups: int = GROUPS, names: dict[str, str] | None = None) -> dict:
     """Merge one run group by group. Writes state.parquet, snapshot.parquet and events.parquet
     to `out` and returns counts plus the suspect boards."""
     work = out / "groups"
@@ -95,7 +96,7 @@ def merge_run(row_files: list[Path], runs: list[dict], state_file: Path | None, 
     counts = Counter()
 
     for g in range(groups):
-        previous = {r["job_id"]: r for r in _read(prev_by_group.get(g))}
+        previous = {r["job_id"]: repair(r, names) for r in _read(prev_by_group.get(g))}
         rows = _read(rows_by_group.get(g))
         by_board: dict[str, dict[str, dict]] = {}
         for r in rows:
@@ -123,7 +124,79 @@ def merge_run(row_files: list[Path], runs: list[dict], state_file: Path | None, 
     pq.write_table(pa.Table.from_pylist(events, schema=EVENT_SCHEMA), out / "events.parquet", compression="zstd")
     for p in work.glob("*.parquet"):
         p.unlink()
-    return {**counts, "events": events, "suspect_boards": suspect}
+    dups = mark_duplicates(out / "state.parquet") if state_w else {"duplicates": 0, "us_duplicates": 0}
+    counts["us_open_jobs"] -= dups["us_duplicates"]
+    return {**counts, **dups, "events": events, "suspect_boards": suspect}
+
+
+def duplicate_key(ats: str | None, ats_job_id: str | None, url: str | None, title: str | None) -> tuple | None:
+    """What makes two open rows the same posting. Oracle: the tenant's job id (ats_job_id is
+    "host:id"), since one tenant's career sites each give the job its own link. Elsewhere: the same
+    link and title (one link with many titles is a career page given to every job, not one job)."""
+    if ats == "oracle" and ats_job_id and ":" in ats_job_id:
+        return ("oracle", ats_job_id.lower())
+    if url and title:
+        return ("url", url, title.strip().lower())
+    return None
+
+
+def _rank(board_id: str, company: str | None) -> tuple:
+    """Which copy is kept: a named employer first, then the lowest board id (stable across runs)."""
+    named = bool((company or "").strip()) and not UNNAMED.search(company or "")
+    return (0 if named else 1, board_id)
+
+
+def mark_duplicates(state: Path) -> dict:
+    """Set duplicate_of on every open row that repeats another open row from a different board
+    (the same company registered twice: 2026-10-11, 68K US Oracle jobs counted twice). The kept
+    copy has duplicate_of empty; consumers (vectors, the catalog count) skip marked rows."""
+    cols = ["job_id", "board_id", "ats", "ats_job_id", "url", "title", "company_name", "closed_at"]
+    best: dict[tuple, tuple] = {}
+    boards_of: dict[tuple, set] = {}
+    f = pq.ParquetFile(state)
+    present = [c for c in cols if c in f.schema_arrow.names]
+    for batch in f.iter_batches(batch_size=100_000, columns=present):
+        d = batch.to_pydict()
+        n_rows = batch.num_rows
+        for jid, board, ats, aid, url, title, co, closed in zip(*(d.get(c, [None] * n_rows) for c in cols)):
+            if closed is not None:
+                continue
+            key = duplicate_key(ats, aid, url, title)
+            if key is None:
+                continue
+            cand = (*_rank(board, co), jid)
+            if key not in best or cand < best[key]:
+                best[key] = cand
+            boards_of.setdefault(key, set()).add(board)
+    keep = {k: v[-1] for k, v in best.items() if len(boards_of[k]) > 1}
+    del best, boards_of
+
+    tmp = state.with_suffix(".dedup.parquet")
+    schema = f.schema_arrow
+    if "duplicate_of" not in schema.names:
+        schema = schema.append(pa.field("duplicate_of", pa.string()))
+    w = pq.ParquetWriter(tmp, schema, compression="zstd")
+    n = us = 0
+    for batch in f.iter_batches(batch_size=ROW_GROUP):
+        d = batch.to_pydict()
+        none = [None] * batch.num_rows
+        ats, aid, url, title, closed, is_us = (d.get(c, none) for c in ("ats", "ats_job_id", "url", "title", "closed_at", "is_us"))
+        marks = []
+        for i, jid in enumerate(d["job_id"]):
+            mark = None
+            if closed[i] is None:
+                key = duplicate_key(ats[i], aid[i], url[i], title[i])
+                winner = keep.get(key) if key is not None else None
+                if winner is not None and winner != jid:
+                    mark = winner
+                    n += 1
+                    us += bool(is_us[i])
+            marks.append(mark)
+        d["duplicate_of"] = marks
+        w.write_table(pa.Table.from_pydict(d, schema=schema), row_group_size=ROW_GROUP)
+    w.close()
+    tmp.replace(state)
+    return {"duplicates": n, "us_duplicates": us}
 
 
 def _read(path: Path | None) -> list[dict]:
