@@ -1,6 +1,6 @@
 name: Fleet run
 
-# Daily at 12:00 UTC (morning in the US), or by hand from the Actions tab.
+# Daily at 11:17 UTC (morning in the US), or by hand from the Actions tab.
 # Reads the boards due today (big boards daily, smaller ones every 2-3 days; ADR 0005),
 # then merges into the dataset. Scrape jobs only produce files; the single merge job is
 # the only writer to the dataset and commits the whole run at once (ADR 0004).
@@ -10,7 +10,7 @@ name: Fleet run
 # FLEET_ARTIFACT_KEY, kept for a day, and logs carry counts only.
 on:
   schedule:
-    - cron: "0 12 * * *"
+    - cron: "17 11 * * *"   # off the top of the hour: GitHub delays or drops :00 schedules under load
   workflow_dispatch:
     inputs:
       shards:
