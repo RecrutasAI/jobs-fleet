@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from .ids import canonical_url, job_id
 from .location import parse as parse_location
@@ -48,14 +49,33 @@ def content_hash(row: dict) -> str:
     return hashlib.sha256("\x1f".join(map(str, parts)).encode()).hexdigest()[:32]
 
 
-def to_row(job: Any, *, ats: str, slug: str, board: str, scraper: Any, scraper_version: str, fetched_at: str) -> dict:
+def oracle_job_url(url: str | None, ats_job_id: str | None) -> str | None:
+    """The job's own page on Oracle Recruiting Cloud. The scraper gives every job the career-site
+    search page (`/?mode=jobs&site_number=CX_1`), which isn't a link to the job. The id is the
+    part of ats_job_id after the host ("eigx.fa.us6.oraclecloud.com:52165"). Checked 2026-10-11:
+    the page opens and Oracle's job-details API returns the same title for the id."""
+    if not url or not ats_job_id or "/job/" in url:
+        return url
+    parts = urlsplit(url)
+    job = ats_job_id.rsplit(":", 1)[-1].strip()
+    if not parts.netloc or not job.isdigit():
+        return url
+    site = dict(parse_qsl(parts.query)).get("site_number") or "CX_1"
+    return f"https://{parts.netloc}/hcmUI/CandidateExperience/en/sites/{site}/job/{job}"
+
+
+def to_row(job: Any, *, ats: str, slug: str, board: str, scraper: Any, scraper_version: str, fetched_at: str,
+           company: str | None = None) -> dict:
+    """`company` is the registry's name for the board; the scrapers often give only the slug."""
     url = _s(job.url)
+    if ats == "oracle":
+        url = oracle_job_url(url, _s(getattr(job, "ats_id", None)))
     row = {
         "job_id": job_id(ats, slug, getattr(job, "ats_id", None), url),
         "board_id": board,
         "ats": ats,
         "slug": slug,
-        "company_name": _s(job.company),
+        "company_name": _s(company) or _s(job.company),
         "ats_job_id": _s(getattr(job, "ats_id", None)),
         "title": _s(job.title),
         "url": canonical_url(url),
