@@ -1,8 +1,11 @@
+import asyncio
+import time
 from pathlib import Path
 
+import httpx
 import pyarrow.parquet as pq
 
-from fleet.pagedates import add_page_dates, parse_page_date
+from fleet.pagedates import add_page_dates, fetch_dates, parse_page_date
 from fleet.store import write_parquet
 
 
@@ -34,3 +37,17 @@ def test_fills_only_open_undated_jobs_of_page_date_sources(tmp_path: Path):
     assert got == {"asked": 2, "dated": 1}
     rows = {r["job_id"]: r["posted_at"] for r in pq.read_table(state).to_pylist()}
     assert rows == {"a": "2026-10-02T00:00:00+00:00", "b": "2026-09-01T00:00:00+00:00", "c": None, "d": None, "e": None}
+
+
+def test_stops_at_the_time_budget_and_keeps_what_it_read():
+    # One site answers at once, another never in time: the step must end on budget, not wait.
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "slow.example":
+            await asyncio.sleep(30)
+        return httpx.Response(200, text='{"datePosted": "2026-10-02"}')
+
+    urls = ["https://fast.example/1", "https://fast.example/2"] + [f"https://slow.example/{i}" for i in range(20)]
+    started = time.monotonic()
+    got = asyncio.run(fetch_dates(urls, budget_s=0.5, transport=httpx.MockTransport(handler)))
+    assert time.monotonic() - started < 5
+    assert got == {"https://fast.example/1": "2026-10-02T00:00:00+00:00", "https://fast.example/2": "2026-10-02T00:00:00+00:00"}

@@ -4,7 +4,10 @@ JazzHR, Recruiterbox, Pinpoint and SuccessFactors list jobs without a date, but 
 states the employer's date in schema.org markup: `"datePosted": "2026-10-02"` (JSON-LD) or
 `itemprop="datePosted" content="Tue Oct 06 07:00:00 UTC 2026"`. Checked 2026-10-12 on a live
 board of each. Read once per job: the date is carried from run to run (history.CARRY_FIELDS),
-so only jobs still without one are fetched, at most MAX_PER_RUN per run.
+so only jobs still without one are fetched, at most MAX_PER_RUN per run and for at most
+TIME_BUDGET_S seconds: most of these pages sit on a few sites, read PER_HOST at a time, and with
+no budget the step outran the merge job's 30-minute limit (2026-10-12), so the run published
+nothing. Pages not read in time are read on a later run.
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ PAGE_DATE_ATS = frozenset({"jazzhr", "recruiterbox", "pinpoint", "successfactors
 MAX_PER_RUN = 12_000
 PER_HOST = 4
 TOTAL = 32
+TIME_BUDGET_S = 600
 
 _JSONLD = re.compile(r'"datePosted"\s*:\s*"([^"]+)"')
 _META = re.compile(r'itemprop=["\']datePosted["\'][^>]*content=["\']([^"\']+)["\']|content=["\']([^"\']+)["\'][^>]*itemprop=["\']datePosted["\']', re.IGNORECASE)
@@ -51,13 +55,14 @@ def _parse(raw: str) -> datetime | None:
     return None
 
 
-async def fetch_dates(urls: list[str]) -> dict[str, str]:
-    """{url: datePosted} for the pages that state one. Polite: PER_HOST at a time per site."""
+async def fetch_dates(urls: list[str], budget_s: float = TIME_BUDGET_S, transport=None) -> dict[str, str]:
+    """{url: datePosted} for the pages that state one, read within `budget_s` seconds.
+    Polite: PER_HOST at a time per site."""
     import httpx
     out: dict[str, str] = {}
     hosts: dict[str, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(PER_HOST))
     total = asyncio.Semaphore(TOTAL)
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True,
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, transport=transport,
                                  headers={"User-Agent": "Mozilla/5.0 (compatible; jobs-fleet; +https://github.com/RecrutasAI/jobs-fleet)"}) as client:
         async def one(url: str) -> None:
             async with total, hosts[urlsplit(url).netloc]:
@@ -69,7 +74,13 @@ async def fetch_dates(urls: list[str]) -> dict[str, str]:
                 when = parse_page_date(r.text)
                 if when:
                     out[url] = when
-        await asyncio.gather(*(one(u) for u in urls))
+        tasks = [asyncio.create_task(one(u)) for u in urls]
+        _, pending = await asyncio.wait(tasks, timeout=budget_s)
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if pending:
+            print(f"page dates: time budget ({budget_s:.0f} s) reached, {len(pending)} of {len(urls)} pages left for a later run")
     return out
 
 
