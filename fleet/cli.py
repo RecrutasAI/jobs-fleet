@@ -63,6 +63,9 @@ def cmd_merge(args: argparse.Namespace) -> int:
     state_file = Path(args.state) if args.state else store.state_file()
     names = {b.id: b.name for b in registry.load(Path(args.registry))} if args.registry else None
     result = merge_run(row_files, runs, state_file, now, content_hash, out, names=names)
+    # Posting dates from the job pages of sources whose listings carry none (fleet/pagedates.py).
+    from .pagedates import add_page_dates
+    page_dates = add_page_dates(out / "state.parquet") if (out / "state.parquet").exists() else {"asked": 0, "dated": 0}
     for run in runs:
         run["suspect_empty"] = run["board_id"] in result["suspect_boards"]
 
@@ -90,6 +93,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
         "suspect_empty": len(result["suspect_boards"]),
         "us_open_jobs": result["us_open_jobs"], "jobs_read": result["jobs_read"], "open_jobs": open_jobs,
         "duplicates_marked": result.get("duplicates", 0),
+        "page_dates": page_dates,
         "events": dict(Counter(e["event"] for e in result["events"])),
         "priorities_changed": reprioritized,
     }
