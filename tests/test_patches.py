@@ -43,3 +43,16 @@ def test_workday_posting_day():
     assert workday_posted_at(None, "Posted 30+ Days Ago", today) is None      # not a date
     assert workday_posted_at(None, None, today) is None
     assert workday_posted_at("garbage", "Posted 2 Days Ago", today).date() == date(2026, 10, 9)
+
+
+def test_workday_retries_wait_out_throttling():
+    import ats_scrapers.scrapers.workday as upstream
+
+    from fleet.patches import WORKDAY_LIMITS, tune_workday
+
+    tune_workday()
+    for name, value in WORKDAY_LIMITS.items():
+        assert getattr(upstream, name) == value
+    # The retry waits add up to a real pause (~2 min), not the upstream ~5 s.
+    waits = [min(upstream.MAX_RETRY_DELAY, upstream.RETRY_BACKOFF ** a) for a in range(upstream.MAX_RETRIES)]
+    assert sum(waits) >= 100

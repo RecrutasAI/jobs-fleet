@@ -96,8 +96,26 @@ def workday_posted_at(start_date: str | None, posted_on: str | None, today: date
     return datetime(d.year, d.month, d.day, tzinfo=UTC)
 
 
+# Workday throttles by IP, and every shard reads from the same GitHub Actions address
+# ranges. ats-scrapers 0.3.0 gives up after 3 retries ~1, 1.5 and 2 s apart (~5 s), so a
+# throttled tenant fails outright: 183 boards on 2026-10-11, 139 of them on the first page,
+# all of which answered normally when probed one request at a time. Patient retries
+# (1, 2, 4 ... 60 s; ~2 min in all) and fewer requests at once per tenant.
+WORKDAY_LIMITS = {"MAX_RETRIES": 7, "RETRY_BACKOFF": 2.0, "MAX_RETRY_DELAY": 60.0, "MAX_CONCURRENCY": 3}
+
+
+def tune_workday() -> None:
+    """Apply WORKDAY_LIMITS to the upstream module (its methods read these at call time)."""
+    import ats_scrapers.scrapers.workday as upstream
+
+    for name, value in WORKDAY_LIMITS.items():
+        setattr(upstream, name, value)
+
+
 def _workday():
     from ats_scrapers.scrapers.workday import WorkdayScraper
+
+    tune_workday()
 
     class PatchedWorkdayScraper(WorkdayScraper):
         def _parse_job(self, item, base_url, company):
