@@ -106,3 +106,15 @@ def test_repair_fixes_stored_rows():
     assert repair(old, {"oracle:eigx": ""})["company_name"] == "eigx.fa.us6.oraclecloud.com"   # unnamed stays unnamed
     gh = {"ats": "greenhouse", "board_id": "greenhouse:a", "url": "https://x/1", "company_name": "A"}
     assert repair(gh, {}) == gh
+
+
+def test_repair_marks_a_location_us_that_todays_rules_read_as_us():
+    from fleet.rows import repair
+    stored = {"location": "Mountain View, California (HQ)", "is_us": False, "countries": None, "country_iso": None,
+              "us_state": None, "city": None, "is_remote": False}
+    out = repair(stored)
+    assert (out["is_us"], out["country_iso"], out["us_state"], out["city"], out["countries"]) == (True, "US", "CA", "Mountain View", "US")
+    # Never removed by repair: a stored US row stays US until its board is read again.
+    assert repair({**stored, "location": "Tbilisi, Georgia", "is_us": True, "countries": "US"})["is_us"] is True
+    # Nothing to do for a row already right.
+    assert repair({**stored, "location": "London, UK"})["is_us"] is False

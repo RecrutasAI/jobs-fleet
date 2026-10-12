@@ -99,3 +99,9 @@ def test_closed_boards_are_turned_off_and_kept(tmp_path):
         rows = {r["slug"]: r for r in csv.DictReader(f)}
     assert rows["aaa"]["enabled"] == "false" and rows["bbb"]["enabled"] == "true"
     assert disable_closed(path, runs) == 0   # already off
+
+
+def test_adp_boards_are_read_by_their_careers_url():
+    from fleet.registry import Board
+    url = "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=7e680810-90b3-483a-bc7f-ab0bb"
+    assert Board(ats="adp", slug="7e680810-90b3-483a-bc7f-ab0bb/190", name="X", careers_url=url).scraper_input == url

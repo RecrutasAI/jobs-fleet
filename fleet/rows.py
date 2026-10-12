@@ -130,8 +130,18 @@ def repair(row: dict, names: dict[str, str] | None = None) -> dict:
 
     Oracle: the job's own link instead of the career-site search page. Names: the registry's name
     for the board; an Oracle board the registry can't name shows its host, so it stays unnamed.
+    US: a location today's rules read as US ("Mountain View, California (HQ)") is marked US. Only
+    added, never removed: a stored row can't tell a country the scraper gave from one read off the
+    text, so a removal waits for the board's next read (to_row).
     """
     out = dict(row)
+    if not out.get("is_us") and out.get("location"):
+        loc = parse_location(out["location"], out.get("is_remote"))
+        if loc.is_us:
+            countries = [c for c in (out.get("countries") or "").split("|") if c]
+            out.update(countries="|".join(["US"] + [c for c in countries if c != "US"]),
+                       country_iso=out.get("country_iso") or "US", us_state=out.get("us_state") or loc.us_state,
+                       city=out.get("city") or loc.city, is_us=True)
     if out.get("ats") == "oracle":
         out["url"] = canonical_url(oracle_job_url(out.get("url"), out.get("ats_job_id"))) or out.get("url")
     if names is not None and out.get("board_id") in names:
