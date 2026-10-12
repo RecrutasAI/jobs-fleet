@@ -18,7 +18,44 @@ def get_scraper(ats: str, scraper_input: str):
         return _bamboohr()(scraper_input)
     if ats == "workday":
         return _workday()(scraper_input)
+    if ats == "apple":
+        _patch_apple_locations()
     return upstream(ats, scraper_input)
+
+
+def apple_location(entry: dict) -> str | None:
+    """One Apple location as "Place, State, Country". Apple's records put the place in `name`
+    ("Cupertino") with `city` and `stateProvince` empty and the country in `countryName`, so
+    `name` alone can't be placed: 4,840 of 4,868 jobs read as not-US (2026-10-12)."""
+    name = (entry.get("name") or "").strip()
+    place = name or (entry.get("city") or "").strip()
+    parts = [place, (entry.get("stateProvince") or "").strip(), (entry.get("countryName") or "").strip()]
+    out: list[str] = []
+    for p in parts:
+        if p and not any(p.lower() in q.lower() for q in out):   # "India" named twice, or a name that already says it
+            out.append(p)
+    return ", ".join(out) or None
+
+
+def _patch_apple_locations() -> None:
+    """Swap ats_scrapers' Apple location decoder for one that keeps state and country."""
+    from ats_scrapers.scrapers import apple
+
+    if getattr(apple, "_fleet_patched", False):
+        return
+
+    def decode(item: dict) -> list[str]:
+        out: list[str] = []
+        for entry in item.get("locations") or item.get("locationsList") or []:
+            label = apple_location(entry) if isinstance(entry, dict) else (entry.strip() if isinstance(entry, str) else None)
+            if label and label not in out:
+                out.append(label)
+        if not out and isinstance(item.get("location"), str) and item["location"].strip():
+            out.append(item["location"].strip())
+        return out
+
+    apple._decode_locations = decode
+    apple._fleet_patched = True
 
 
 def parse_bamboohr_widget(text: str, slug: str) -> list[dict] | None:
