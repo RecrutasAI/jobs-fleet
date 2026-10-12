@@ -121,3 +121,29 @@ def reprioritize(path: Path, runs: list[dict]) -> int:
     tmp.replace(path)
     return changed
 
+
+
+def disable_closed(path: Path, runs: list[dict]) -> int:
+    """Turn off boards whose job site the employer closed (run status 'closed'), so they
+    stop being read. Kept in the registry, so turning one back on is a one-word edit.
+    Returns how many were turned off."""
+    closed = {r["board_id"] for r in runs if r.get("status") == "closed"}
+    if not closed:
+        return 0
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or COLUMNS
+        rows = list(reader)
+    changed = 0
+    for row in rows:
+        if row.get("ats") and row.get("slug") and board_id(row["ats"], row["slug"]) in closed \
+                and (row.get("enabled") or "true").strip().lower() not in ("false", "0", "no"):
+            row["enabled"] = "false"
+            changed += 1
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+    tmp.replace(path)
+    return changed

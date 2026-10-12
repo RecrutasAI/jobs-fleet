@@ -80,9 +80,10 @@ def cmd_merge(args: argparse.Namespace) -> int:
     }
     files = {dest: path for dest, path in files.items() if path.exists() or path.name == "runs.parquet"}
     store.write_parquet(runs, files[f"runs/date={day}/{stamp}.parquet"])
-    reprioritized = None
+    reprioritized = disabled = None
     if args.registry:
         reprioritized = registry.reprioritize(Path(args.registry), runs)
+        disabled = registry.disable_closed(Path(args.registry), runs)
         files[registry.DATASET_PATH] = Path(args.registry)
 
     open_jobs = result["open_jobs"]
@@ -90,12 +91,14 @@ def cmd_merge(args: argparse.Namespace) -> int:
         "boards": len(runs), "boards_ok": sum(r["status"] == "ok" for r in runs),
         "boards_failed": sum(r["status"] == "error" for r in runs),
         "boards_unavailable": sum(r["status"] == "unavailable" for r in runs),
+        "boards_closed": sum(r["status"] == "closed" for r in runs),
         "suspect_empty": len(result["suspect_boards"]),
         "us_open_jobs": result["us_open_jobs"], "jobs_read": result["jobs_read"], "open_jobs": open_jobs,
         "duplicates_marked": result.get("duplicates", 0),
         "page_dates": page_dates,
         "events": dict(Counter(e["event"] for e in result["events"])),
         "priorities_changed": reprioritized,
+        "boards_disabled": disabled,
     }
     print(json.dumps(summary, indent=2))
     if args.dry_run:

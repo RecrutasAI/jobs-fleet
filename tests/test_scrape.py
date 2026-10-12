@@ -33,3 +33,9 @@ def test_workday_boards_are_read_a_couple_at_a_time(monkeypatch):
     boards = [Board(ats="workday", slug=f"t{i}/site", name=f"T{i}", careers_url="") for i in range(8)]
     asyncio.run(scrape.read_boards(boards))
     assert live["peak"] == scrape.VENDOR_CONCURRENCY["workday"]
+
+def test_closed_paycom_site_is_closed_not_an_error():
+    from fleet.scrape import classify_failure
+    target = "https://www.paycomonline.net/v4/ats/web.php/Jobs/JobsNotExist/jobsNotExist"
+    assert classify_failure("paycom", "ScraperError: Paycom page omitted the public portal configuration", target) == "closed"
+    assert classify_failure("paycom", "ScraperError: boom", None) == "error"

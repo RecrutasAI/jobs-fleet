@@ -80,3 +80,22 @@ def test_reprioritize_uses_clean_reads_only(tmp_path: Path):
     by_slug = {b.slug: b for b in registry.load(f)}
     assert {s: b.priority for s, b in by_slug.items()} == {"big": 1, "small": 3, "broken": 1, "empty": 1, "unread": 2}
     assert by_slug["unread"].enabled is False  # other columns untouched
+
+
+def test_closed_boards_are_turned_off_and_kept(tmp_path):
+    import csv
+
+    from fleet.registry import disable_closed
+
+    path = tmp_path / "boards.csv"
+    path.write_text(
+        "ats,slug,name,careers_url,priority,enabled\n"
+        "paycom,aaa,A,https://a,2,true\n"
+        "paycom,bbb,B,https://b,2,true\n"
+    )
+    runs = [{"board_id": "paycom:aaa", "status": "closed"}, {"board_id": "paycom:bbb", "status": "error"}]
+    assert disable_closed(path, runs) == 1
+    with open(path) as f:
+        rows = {r["slug"]: r for r in csv.DictReader(f)}
+    assert rows["aaa"]["enabled"] == "false" and rows["bbb"]["enabled"] == "true"
+    assert disable_closed(path, runs) == 0   # already off
