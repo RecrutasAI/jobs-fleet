@@ -24,6 +24,10 @@ on:
         description: "Merge without writing to the dataset"
         type: boolean
         default: false
+      allow_drop:
+        description: "Publish even if open jobs fall >10% or >25% of boards fail (a deliberate cleanup)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -121,4 +125,5 @@ jobs:
       - name: Merge
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FLEET_ALLOW_DROP: ${{ inputs.allow_drop && '1' || '' }}   # fleet/gate.py
         run: python -m fleet.cli merge --in in/ --registry "$RUNNER_TEMP/boards.csv" ${{ inputs.dry_run && '--dry-run' || '' }}
