@@ -18,15 +18,24 @@ VENDOR_CONCURRENCY = {"workday": 2}
 
 
 MAINTENANCE_MARKERS = ("maintenance", "/outage", "/drs/outage")
+# The employer closed its job site: Paycom sends a retired portal to "jobs do not exist"
+# (58 of 61 failing Paycom boards on 2026-10-12).
+CLOSED_MARKERS = ("jobsnotexist",)
+# Vendors whose failures are checked for a redirect that explains them.
+PROBE_REDIRECT = ("workday", "paycom")
 
 
 def classify_failure(ats: str, error: str, redirect_to: str | None) -> str:
-    """'unavailable' when the site says it's down for maintenance (not our bug), else 'error'.
+    """'unavailable' when the site says it's down for maintenance (not our bug), 'closed'
+    when the employer retired the job site, else 'error'.
 
     Workday sends every tenant to an outage page during its scheduled windows; seen
     2026-10-10, when 12 boards redirected to community.workday.com/maintenance-page.
     """
-    if redirect_to and any(m in redirect_to.lower() for m in MAINTENANCE_MARKERS):
+    target = (redirect_to or "").lower()
+    if target and any(m in target for m in CLOSED_MARKERS):
+        return "closed"
+    if target and any(m in target for m in MAINTENANCE_MARKERS):
         return "unavailable"
     return "error"
 
@@ -82,9 +91,11 @@ async def _read_board(board: Board, version: str, sem: asyncio.Semaphore) -> tup
             run.update(status="error", error=f"timed out after {BOARD_TIMEOUT_S}s")
         except Exception as err:  # noqa: BLE001 - every failure becomes a run record, never a crash
             message = f"{type(err).__name__}: {err}"[:500]
-            redirect = await _redirect_target(board.careers_url) if board.ats == "workday" else None
+            redirect = await _redirect_target(board.careers_url) if board.ats in PROBE_REDIRECT else None
             status = classify_failure(board.ats, message, redirect)
-            run.update(status=status, error=(f"site down for maintenance (redirects to {redirect})" if status == "unavailable" else message))
+            reason = {"unavailable": f"site down for maintenance (redirects to {redirect})",
+                      "closed": f"job site closed by the employer (redirects to {redirect})"}
+            run.update(status=status, error=reason.get(status, message))
     run["duration_s"] = round(time.monotonic() - started, 2)
     return rows, run
 
