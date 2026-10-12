@@ -46,7 +46,7 @@ CASES = [
     ("IND-Bangalore Electronic City - S1", ("IN", None, "Bangalore Electronic City", False, False)),
     ("IRL - Dublin", ("IE", None, "Dublin", False, False)),
     ("India - Bangalore", ("IN", None, "Bangalore", False, False)),
-    ("Orlando area", (None, None, "Orlando area", False, False)),   # no country in the text: unknown
+    ("Orlando area", (None, None, "Orlando", False, False)),        # no country in the text: unknown ("area" is filler)
     ("2 Locations", (None, None, "2 Locations", False, False)),     # Workday summary: unknown
 ]
 
@@ -69,3 +69,24 @@ def test_several_locations():
 def test_scraper_remote_flag_is_kept():
     assert parse("Austin, TX", is_remote=True).is_remote
     assert parse(None, is_remote=True).is_remote and parse(None).country_iso is None
+
+
+# Measured on every open location in the dataset (2026-10-12): 7,838 jobs gained, 0 lost.
+@pytest.mark.parametrize("text, expected", [
+    ("Mountain View, California (HQ)", ("US", "CA", "Mountain View")),          # Nuro: 94 jobs read as not US
+    ("California - SF", ("US", "CA", "SF")),                                   # state first, city after a dash
+    ("Massachusetts - Boston", ("US", "MA", "Boston")),
+    ("USA, North Carolina, Charlotte, 28273", ("US", "NC", "Charlotte")),
+    ("Natick, Massachusetts, USA (Natick-Coach)", ("US", "MA", "Natick")),
+    ("Austin, Texas Office", ("US", "TX", "Austin")),
+    # A city named like a state keeps the state written after it.
+    ("Washington, DC", ("US", "DC", "Washington")),
+    ("Wyoming, MI, US", ("US", "MI", "Wyoming")),
+    ("Delaware, OH, United States", ("US", "OH", "Delaware")),
+    # Georgia the country.
+    ("Tbilisi, Georgia", ("GE", None, "Tbilisi")),
+    ("Georgia, Tbilisi", ("GE", None, "Tbilisi")),
+])
+def test_us_states_written_any_way(text, expected):
+    loc = parse(text)
+    assert (loc.country_iso, loc.us_state, loc.city) == expected

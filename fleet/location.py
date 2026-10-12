@@ -63,6 +63,11 @@ ISO3 = {
 POSTAL = re.compile(r"^(\d{5}(-\d{4})?|[A-Z]\d[A-Z] ?\d[A-Z]\d|\d{4,6})$", re.IGNORECASE)
 REMOTE = re.compile(r"\b(remote|anywhere|work from home|wfh|telecommute|distributed)\b", re.IGNORECASE)
 SEGMENT_SPLIT = re.compile(r"\s*[;|]\s*")
+GEORGIA_CITIES = {"tbilisi", "tbilisi city", "batumi", "kutaisi", "rustavi"}
+# Words posts add after a place that aren't part of it: "Mountain View, California (HQ)",
+# "Austin, Texas Office", "Bay Area, California Metro".
+FILLER = re.compile(r"\s+(hq|headquarters|office|offices|campus|hub|onsite|on-site|in-office|hybrid|area|metro|metropolitan|region)\.?$",
+                    re.IGNORECASE)
 
 
 @dataclass
@@ -100,7 +105,7 @@ def _segment(text: str) -> tuple[Place, bool]:
     s = REMOTE.sub(" ", text) if remote else text
     s = re.sub(r"[()\[\]]", " ", s)
     s = re.sub(r"\s+-\s*|\s*-\s+", ", ", s)      # "Remote - Canada" / "Remote- Canada" → separators
-    parts = [p.strip() for p in s.split(",")]
+    parts = [FILLER.sub("", p.strip()).strip() for p in s.split(",")]
     parts = [p for p in parts if p and not POSTAL.match(p)]
     place = Place()
     if not parts:
@@ -127,6 +132,10 @@ def _segment(text: str) -> tuple[Place, bool]:
                 place.city = rest[0]
             return place, remote
 
+    # Georgia the country, not the state: its cities say so ("Tbilisi, Georgia", "Georgia, Tbilisi").
+    if any(p.lower() in GEORGIA_CITIES for p in parts):
+        return Place(country="GE", city=next(p for p in parts if p.lower() in GEORGIA_CITIES)), remote
+
     # 1. Explicit country at the end (allowing "Michigan USA" written without a comma).
     last = parts[-1]
     m = re.match(r"^(.*?)\s+(usa|u\.s\.a?\.?|united states)$", last, re.IGNORECASE)
@@ -150,6 +159,13 @@ def _segment(text: str) -> tuple[Place, bool]:
             country, parts = "CA", parts[:-1]
         elif country:
             parts = parts[:-1] if len(parts) > 1 else parts   # drop a region we don't model ("Karnataka")
+        else:
+            # A US state written by its full name before the city ("California - SF", "Texas,
+            # Austin"): no country and no state at the end, but one part names exactly one state.
+            named = [p for p in parts if p.lower() in STATE_BY_NAME]
+            if len(named) == 1 and len(parts) >= 2:
+                country, place.state = "US", STATE_BY_NAME[named[0].lower()]
+                parts = [p for p in parts if p is not named[0] and _country_token(p) != "US"]   # "USA, Ohio, Groveport"
 
     if parts:
         place.city = parts[0].strip() or None

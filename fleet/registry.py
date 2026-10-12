@@ -35,7 +35,8 @@ COLUMNS = ["ats", "slug", "name", "careers_url", "priority", "enabled"]
 # (Workday: https://{co}.wdN.myworkdayjobs.com/{site}; Oracle: the oraclecloud.com site;
 # SuccessFactors: the recruiting host or legacy career URL; Keka: the *.keka.com/careers page;
 # Recruitee: the career site, which may be a custom domain). Identity still uses the slug.
-URL_INPUT_ATS = frozenset({"workday", "oracle", "successfactors", "keka", "recruitee"})
+# ADP: the scraper needs the public workforcenow URL (it carries the cid), not the directory's id/number slug.
+URL_INPUT_ATS = frozenset({"workday", "oracle", "successfactors", "keka", "recruitee", "adp"})
 
 
 @dataclass(frozen=True)
