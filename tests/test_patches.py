@@ -56,3 +56,16 @@ def test_workday_retries_wait_out_throttling():
     # The retry waits add up to a real pause (~2 min), not the upstream ~5 s.
     waits = [min(upstream.MAX_RETRY_DELAY, upstream.RETRY_BACKOFF ** a) for a in range(upstream.MAX_RETRIES)]
     assert sum(waits) >= 100
+
+
+def test_apple_locations_keep_state_and_country():
+    from fleet.location import parse
+    from fleet.patches import apple_location
+    # Real record (2026-10-12): the place is in `name`, city and state are empty.
+    cupertino = {"postLocationId": "postLocation-CUP", "city": "", "stateProvince": "", "countryName": "United States of America",
+                 "name": "Cupertino", "countryID": "iso-country-USA"}
+    assert apple_location(cupertino) == "Cupertino, United States of America"
+    assert parse(apple_location(cupertino)).is_us
+    assert apple_location({"city": "Austin", "stateProvince": "Texas", "countryName": "United States", "name": ""}) == "Austin, Texas, United States"
+    assert apple_location({"countryName": "India", "name": "India"}) == "India"
+    assert apple_location({"name": "Shanghai, China", "countryName": "China"}) == "Shanghai, China"
