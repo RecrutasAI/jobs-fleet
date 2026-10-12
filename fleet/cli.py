@@ -62,6 +62,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
     out = store.tmpdir()
     state_file = Path(args.state) if args.state else store.state_file()
     names = {b.id: b.name for b in registry.load(Path(args.registry))} if args.registry else None
+    from . import gate
+    published = gate.published_counts(state_file)   # before this run, for the publish gate
     result = merge_run(row_files, runs, state_file, now, content_hash, out, names=names)
     # Posting dates from the job pages of sources whose listings carry none (fleet/pagedates.py).
     from .pagedates import add_page_dates
@@ -100,10 +102,18 @@ def cmd_merge(args: argparse.Namespace) -> int:
         "priorities_changed": reprioritized,
         "boards_disabled": disabled,
     }
+    summary["retried_ok"] = sum(1 for r in runs if r.get("retried") and r["status"] == "ok")
     print(json.dumps(summary, indent=2))
+    stop = gate.problems(published, summary)
+    for p in stop:
+        print(f"::error title=Publish gate::{p}")
     if args.dry_run:
         print(f"dry run: files left in {out}")
         return 0
+    if stop and not gate.allowed():
+        print("Not published: this run looks broken (above). Recrutas keeps the last good data. "
+              "If the drop is intended, run again with allow_drop.")
+        return 2
     url = store.commit_run(files, f"Run {now}: {summary['boards_ok']}/{summary['boards']} boards, "
                                   f"{open_jobs} open jobs, events {summary['events']}")
     print(f"committed: {url}")
