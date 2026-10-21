@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import os
 from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -146,7 +148,17 @@ def cmd_embed_combine(args: argparse.Namespace) -> int:
     return 0
 
 
+def quiet_library_logs(env=os.environ) -> None:
+    """This repo's run logs are public. The scraper library logs failures with the board and job ids
+    ("Retaining Paylocity job <board>:<job> ..."), which together list the boards we read; our own
+    output is counts only (print). So library logging is off in runs; FLEET_VERBOSE_LOGS=1 brings it
+    back for local debugging."""
+    if env.get("FLEET_VERBOSE_LOGS") != "1":
+        logging.disable(logging.ERROR)
+
+
 def main() -> int:
+    quiet_library_logs()
     p = argparse.ArgumentParser(prog="fleet")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("scrape")
