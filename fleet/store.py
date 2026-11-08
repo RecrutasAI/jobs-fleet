@@ -56,7 +56,25 @@ def commit_run(files: dict[str, Path], message: str) -> str:
     from huggingface_hub import CommitOperationAdd, HfApi
     ops = [CommitOperationAdd(path_in_repo=dest, path_or_fileobj=str(src)) for dest, src in files.items()]
     info = HfApi().create_commit(DATASET, operations=ops, commit_message=message, repo_type="dataset")
+    squash_history()
     return info.commit_url
+
+
+def squash_history() -> None:
+    """Keep only the latest version of the dataset.
+
+    Every run adds about 2.5 GB of new Parquet and Hugging Face keeps every old version, so the
+    private dataset hit its storage limit and every merge from Oct 30 to Nov 8, 2026 was refused
+    ("Private storage limit reached"). Nothing reads old versions (readers use main), so squashing
+    after each commit keeps storage at about one copy. A failed squash is only a warning: the run's
+    data is already committed, and the next run squashes again.
+    """
+    from huggingface_hub import HfApi
+    try:
+        HfApi().super_squash_history(DATASET, repo_type="dataset", branch="main",
+                                     commit_message="Keep only the latest version (storage)")
+    except Exception as err:  # noqa: BLE001 - never fail a committed run over housekeeping
+        print(f"::warning::history squash failed, storage will grow until the next run squashes: {err}")
 
 
 def download(path_in_repo: str) -> Path | None:
