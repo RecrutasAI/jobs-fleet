@@ -127,3 +127,21 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           FLEET_ALLOW_DROP: ${{ inputs.allow_drop && '1' || '' }}   # fleet/gate.py
         run: python -m fleet.cli merge --in in/ --registry "$RUNNER_TEMP/boards.csv" ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  # A failed run used to be visible only as a GitHub email (it sat unread in a Gmail tab while every
+  # merge was refused for 9 days, Oct 30 to Nov 8, 2026). Push it to the same phone channel as the VPS
+  # alerts (infra/vps/alert.sh in the app repo): subject only, ntfy's public server is open to read.
+  notify:
+    needs: [plan, scrape, merge]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Phone alert
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -z "$NTFY_TOPIC" ]; then echo "::warning::NTFY_TOPIC not set, no phone alert"; exit 0; fi
+          curl -fsS -m 20 -H "Title: Fleet run failed" -H "Priority: high" \
+            -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "https://ntfy.sh/$NTFY_TOPIC"
