@@ -1,0 +1,38 @@
+name: Fleet run start
+
+# Starts today's Fleet run when none has started. GitHub delays or skips scheduled runs under load
+# (fleet-run.yml's own 11:17 UTC schedule rarely fires on time), so this tries every hour and does
+# nothing once today's run exists. It lived in the private app repo as "Fleet run trigger"; moved
+# here on Nov 20 2026 because public-repo minutes are free and the private minutes ran out. In this
+# repo the built-in token can start the run, so no extra token is needed.
+
+on:
+  schedule:
+    - cron: '47 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: fleet-run-start
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Start today's Fleet run if none has started
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          today="$(date -u +%F)"
+          runs="$(gh api "repos/${{ github.repository }}/actions/workflows/fleet-run.yml/runs?created=%3E%3D$today&per_page=1" --jq .total_count)"
+          if [ "$runs" -gt 0 ]; then
+            echo "Fleet run already started today ($runs since $today 00:00 UTC); nothing to do"
+            exit 0
+          fi
+          gh workflow run fleet-run.yml -R "${{ github.repository }}" --ref main
+          echo "No Fleet run today: started one"

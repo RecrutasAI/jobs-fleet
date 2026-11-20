@@ -1,0 +1,53 @@
+name: Watchdog
+
+# Off-box dead-man's switch for the Recrutas app and its Hetzner VPS: a dead box sends nothing, so
+# something elsewhere has to notice the silence. It lived in the private app repo; moved here on
+# Nov 20 2026 because public-repo Actions minutes are free and the private repos' 2,000 monthly
+# minutes ran out (Nov 19), which stopped it. It only reads two public pages and logs their status.
+# A failure pushes a phone alert (ntfy, same channel as the Fleet run and the VPS alerts).
+
+on:
+  schedule:
+    - cron: '17 * * * *'   # hourly, off the top of the hour
+  workflow_dispatch:
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: App and database reachable
+        # /api/platform/stats reads the VPS Postgres: failing means Vercel is down or the app can't
+        # reach the database.
+        id: app
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 https://www.recrutas.ai/api/platform/stats) || code=000
+          echo "http=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" = "200" ] || { echo "::error::App/DB check failed (http=$code)"; exit 1; }
+
+      - name: VPS cron fleet alive
+        # 503 once the freshest pipeline heartbeat is older than 26 hours: the VPS crons stopped.
+        if: always()
+        id: crons
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 https://www.recrutas.ai/api/health/pipelines) || code=000
+          echo "http=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" = "200" ] || { echo "::error::Pipeline freshness check failed (http=$code)"; exit 1; }
+
+      - name: Phone alert
+        if: failure()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -z "$NTFY_TOPIC" ]; then echo "::warning::NTFY_TOPIC not set, no phone alert"; exit 0; fi
+          curl -fsS -m 20 -H "Title: Recrutas watchdog: app ${{ steps.app.outputs.code }}, crons ${{ steps.crons.outputs.code }}" -H "Priority: high" \
+            -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "https://ntfy.sh/$NTFY_TOPIC"
