@@ -15,7 +15,7 @@ on:
     inputs:
       shards:
         description: "Parallel scrape jobs"
-        default: "20"
+        default: "18"   # 18, not 20: a free org runs 20 jobs at once, so 2 slots stay free for the watchdog, the matcher and the daily start
       all_boards:
         description: "Read every board, not just the ones due today"
         type: boolean
@@ -46,7 +46,7 @@ jobs:
       shards: ${{ steps.p.outputs.shards }}
     steps:
       - id: p
-        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 20 }}')))))")" >> "$GITHUB_OUTPUT"
+        run: echo "shards=$(python3 -c "import json; print(json.dumps(list(range(int('${{ inputs.shards || 18 }}')))))")" >> "$GITHUB_OUTPUT"
       - run: pip install -q huggingface_hub
       - name: Fetch the private registry
         env:
@@ -92,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in registry.enc -out "$FLEET_REGISTRY"
-          python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 20 }} --out out ${{ inputs.all_boards && '--all' || '' }}
+          python -m fleet.cli scrape --shard ${{ matrix.shard }} --of ${{ inputs.shards || 18 }} --out out ${{ inputs.all_boards && '--all' || '' }}
           tar -C out -czf - . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:FLEET_ARTIFACT_KEY -out shard.enc
       - uses: actions/upload-artifact@v4
         with:
