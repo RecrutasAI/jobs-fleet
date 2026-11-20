@@ -67,7 +67,10 @@ jobs:
   scrape:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Was 120: since the Nov 16 2026 evening run, 8 to 10 of the 20 shards hit it every run and were
+    # cut off, so their boards kept old data (60% of open postings seen within a day on Nov 19).
+    # Public repo minutes are free and a hosted job may run up to 6 hours.
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +136,9 @@ jobs:
   # alerts (infra/vps/alert.sh in the app repo): subject only, ntfy's public server is open to read.
   notify:
     needs: [plan, scrape, merge]
-    if: ${{ failure() }}
+    # Also when shards were cut off: a timed-out shard ends "cancelled", not "failed", and the merge
+    # still publishes what finished, so the run looked fine while half the boards went unread.
+    if: ${{ always() && (needs.plan.result != 'success' || needs.scrape.result != 'success' || needs.merge.result != 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -142,6 +147,6 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
           if [ -z "$NTFY_TOPIC" ]; then echo "::warning::NTFY_TOPIC not set, no phone alert"; exit 0; fi
-          curl -fsS -m 20 -H "Title: Fleet run failed" -H "Priority: high" \
+          curl -fsS -m 20 -H "Title: Fleet run incomplete (plan ${{ needs.plan.result }}, scrape ${{ needs.scrape.result }}, merge ${{ needs.merge.result }})" -H "Priority: high" \
             -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "https://ntfy.sh/$NTFY_TOPIC"
