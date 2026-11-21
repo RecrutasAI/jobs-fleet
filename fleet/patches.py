@@ -5,9 +5,14 @@ is removed once a released ats-scrapers version includes an equivalent fix.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import types
 from datetime import UTC, date, datetime, timedelta
+from typing import Self
+
+import httpx
 
 
 def get_scraper(ats: str, scraper_input: str):
@@ -142,11 +147,81 @@ WORKDAY_LIMITS = {"MAX_RETRIES": 7, "RETRY_BACKOFF": 2.0, "MAX_RETRY_DELAY": 60.
 
 
 def tune_workday() -> None:
-    """Apply WORKDAY_LIMITS to the upstream module (its methods read these at call time)."""
+    """Apply WORKDAY_LIMITS to the upstream module (its methods read these at call time), and
+    read through CloakClient instead of httpx."""
     import ats_scrapers.scrapers.workday as upstream
 
     for name, value in WORKDAY_LIMITS.items():
         setattr(upstream, name, value)
+    upstream.httpx = types.SimpleNamespace(AsyncClient=CloakClient, HTTPError=httpx.HTTPError)
+
+
+DETAIL_429_WAITS_S = (2.0, 4.0, 8.0, 16.0)
+
+
+class _CloakResponse:
+    """The parts of an httpx.Response the Workday reader uses; json() raises ValueError on a bad body."""
+
+    def __init__(self, status_code: int, text: str, headers: dict[str, str]) -> None:
+        self.status_code = status_code
+        self.text = text
+        self.headers = headers
+
+    def json(self):
+        return json.loads(self.text)
+
+
+class CloakClient:
+    """Stand-in for the httpx.AsyncClient the Workday reader opens, over httpcloak (a browser's TLS
+    fingerprint). Since Nov 17 2026 Workday answers plain Python clients with a 429 page while a
+    browser or curl gets the jobs: Workday boards read fell from 2,178 (709,931 jobs, Nov 15) to
+    ~595 (~50K jobs) in every run since, 1,190 of them failing on the very first page. Same
+    request, same User-Agent: only the connection fingerprint differs. The reader uses only
+    get, post and httpx.HTTPError, so a transport failure is raised as httpx.TransportError and
+    its own retries still apply."""
+
+    def __init__(self, *, timeout: float = 30.0, follow_redirects: bool = True, proxy: str | None = None, **_) -> None:
+        import httpcloak
+
+        self._session = httpcloak.Session(timeout=max(1, int(timeout)), allow_redirects=follow_redirects, proxy=proxy)
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self._session.close()
+
+    async def get(self, url: str, *, headers: dict[str, str] | None = None) -> _CloakResponse:
+        """A job's detail. The reader asks once and keeps the listing row on any failure, but
+        Workday rate-limits bursts: NVIDIA answered 429 to 2,132 of 2,660 details read 3 at a
+        time (Nov 21 2026), and a single request a moment later got 200. So a 429 waits and asks
+        again, slowing to the site's pace."""
+        for wait in (*DETAIL_429_WAITS_S, None):
+            r = await self._send(self._session.get_async, url, headers=_browser_headers(headers))
+            if r.status_code != 429 or wait is None:
+                return r
+            after = r.headers.get("Retry-After") or r.headers.get("retry-after") or ""
+            await asyncio.sleep(min(60.0, float(after)) if after.isdigit() else wait)
+        return r
+
+    async def post(self, url: str, *, json: dict | None = None, headers: dict[str, str] | None = None) -> _CloakResponse:
+        return await self._send(self._session.post_async, url, json=json, headers=_browser_headers(headers))
+
+    @staticmethod
+    async def _send(call, url: str, **kwargs) -> _CloakResponse:
+        try:
+            r = await call(url, **kwargs)
+        except Exception as err:  # httpcloak's errors become the transport error the reader retries
+            raise httpx.TransportError(f"httpcloak: {type(err).__name__}: {err}") from err
+        return _CloakResponse(r.status_code, r.text, dict(r.headers or {}))
+
+
+def _browser_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
+    """The reader's headers minus its User-Agent ("Mozilla/5.0"): httpcloak sends the browser's own,
+    which has to match the fingerprint."""
+    if not headers:
+        return None
+    return {k: v for k, v in headers.items() if k.lower() != "user-agent"} or None
 
 
 def _workday():
