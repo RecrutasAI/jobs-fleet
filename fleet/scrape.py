@@ -11,6 +11,10 @@ from .registry import Board
 from .rows import to_row
 
 BOARD_TIMEOUT_S = 1800  # big boards (Domino's, ~25K jobs) need ~10+ min; still bounded so one board can't hold a shard hostage
+# Boards that need longer. Apple reads ~250 listing pages one after another, then every job's
+# detail: ~5,100 jobs took 32-34 min, finishing Nov 20 2026 and cut off at 30 min both runs of
+# Nov 21. A shard may run 4 hours, so one board at 60 min still leaves room.
+BOARD_TIMEOUT_BY_ATS = {"apple": 3600}
 CONCURRENCY = 6         # boards read at once per worker (each board is a different site)
 # Per-vendor caps within that: Workday tenants share Workday's servers and throttle us as
 # one client, so only a couple at once (patches.WORKDAY_LIMITS covers retries per tenant).
@@ -76,7 +80,7 @@ async def read_board(board: Board, version: str, sem: asyncio.Semaphore,
 
 async def _read_board(board: Board, version: str, sem: asyncio.Semaphore,
                       timeout_s: float | None = None) -> tuple[list[dict], dict]:
-    timeout_s = BOARD_TIMEOUT_S if timeout_s is None else timeout_s
+    timeout_s = BOARD_TIMEOUT_BY_ATS.get(board.ats, BOARD_TIMEOUT_S) if timeout_s is None else timeout_s
     started = time.monotonic()
     run = {"board_id": board.id, "ats": board.ats, "slug": board.slug, "started_at": _now(),
            "status": "ok", "jobs": 0, "error": None, "duration_s": 0.0, "scraper_version": version,

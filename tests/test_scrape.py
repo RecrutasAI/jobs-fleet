@@ -76,3 +76,29 @@ def test_a_throttled_board_is_read_again_once_and_kept_when_it_recovers(monkeypa
     assert by["throttled"]["status"] == "ok" and by["throttled"]["retried"] and calls["throttled"] == 2
     assert by["broken"]["status"] == "error" and by["broken"]["retried"] and calls["broken"] == 2
     assert by["slow"]["status"] == "error" and calls["slow"] == 1   # a timeout isn't retried
+
+
+def test_apple_gets_a_longer_board_limit_than_the_rest(monkeypatch):
+    import asyncio
+
+    from fleet import scrape
+    from fleet.registry import Board
+
+    limits = {}
+
+    async def fake_wait_for(coro, timeout):
+        coro.close()
+        limits[len(limits)] = timeout
+        return []
+
+    class FakeScraper:
+        async def afetch(self):
+            return []
+
+    monkeypatch.setattr(scrape, "get_scraper", lambda ats, inp: FakeScraper())
+    monkeypatch.setattr(scrape.asyncio, "wait_for", fake_wait_for)
+    sem = asyncio.Semaphore(1)
+    asyncio.run(scrape._read_board(Board("apple", "apple", "Apple", "https://jobs.apple.com"), "t", sem))
+    asyncio.run(scrape._read_board(Board("greenhouse", "acme", "Acme", ""), "t", sem))
+    asyncio.run(scrape._read_board(Board("apple", "apple", "Apple", "https://jobs.apple.com"), "t", sem, timeout_s=300))
+    assert limits == {0: 3600, 1: scrape.BOARD_TIMEOUT_S, 2: 300}   # an explicit limit (the retry's) still wins
