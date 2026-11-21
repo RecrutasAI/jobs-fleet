@@ -69,3 +69,107 @@ def test_apple_locations_keep_state_and_country():
     assert apple_location({"city": "Austin", "stateProvince": "Texas", "countryName": "United States", "name": ""}) == "Austin, Texas, United States"
     assert apple_location({"countryName": "India", "name": "India"}) == "India"
     assert apple_location({"name": "Shanghai, China", "countryName": "China"}) == "Shanghai, China"
+
+
+class _FakeResp:
+    def __init__(self, status, text="{}", headers=None):
+        self.status_code, self.text, self.headers = status, text, headers or {}
+
+
+class _FakeSession:
+    """httpcloak.Session stand-in: answers from a queue and records what was sent."""
+
+    def __init__(self, answers):
+        self.answers, self.sent = list(answers), []
+
+    async def get_async(self, url, **kw):
+        self.sent.append(("GET", url, kw))
+        a = self.answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    async def post_async(self, url, **kw):
+        return await self.get_async(url, **kw)
+
+    def close(self):
+        pass
+
+
+def _client(answers):
+    from fleet.patches import CloakClient
+
+    c = CloakClient.__new__(CloakClient)
+    c._session = _FakeSession(answers)
+    return c
+
+
+def test_workday_reads_through_the_cloak_client():
+    import ats_scrapers.scrapers.workday as upstream
+    import httpx
+
+    from fleet.patches import CloakClient, get_scraper
+
+    get_scraper("workday", "https://nvidia.wd5.myworkdayjobs.com/nvidiaexternalcareersite")
+    assert upstream.httpx.AsyncClient is CloakClient
+    assert upstream.httpx.HTTPError is httpx.HTTPError   # the reader's except clauses still catch
+
+
+def test_cloak_client_drops_the_readers_user_agent_and_keeps_the_rest():
+    import asyncio
+
+    c = _client([_FakeResp(200, '{"total": 3}')])
+    r = asyncio.run(c.post("https://x/jobs", json={"offset": 0}, headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}))
+    assert r.status_code == 200 and r.json() == {"total": 3}
+    _, _, kw = c._session.sent[0]
+    assert kw["headers"] == {"Content-Type": "application/json"} and kw["json"] == {"offset": 0}
+
+
+def test_cloak_client_waits_out_a_detail_429(monkeypatch):
+    import asyncio
+
+    from fleet import patches
+
+    waits = []
+
+    async def no_sleep(s):
+        waits.append(s)
+
+    monkeypatch.setattr(patches.asyncio, "sleep", no_sleep)
+    c = _client([_FakeResp(429), _FakeResp(429, headers={"Retry-After": "5"}), _FakeResp(200, '{"jobPostingInfo": {}}')])
+    r = asyncio.run(c.get("https://x/job/1", headers={"Accept": "application/json"}))
+    assert r.status_code == 200 and waits == [2.0, 5.0]
+
+
+def test_cloak_client_gives_up_on_a_detail_after_the_last_wait(monkeypatch):
+    import asyncio
+
+    from fleet import patches
+
+    async def no_sleep(s):
+        pass
+
+    monkeypatch.setattr(patches.asyncio, "sleep", no_sleep)
+    c = _client([_FakeResp(429)] * (len(patches.DETAIL_429_WAITS_S) + 1))
+    assert asyncio.run(c.get("https://x/job/1")).status_code == 429   # the reader then keeps the listing row
+    assert c._session.answers == []
+
+
+def test_cloak_client_failure_is_an_httpx_transport_error():
+    import asyncio
+
+    import httpx
+    import pytest
+
+    c = _client([RuntimeError("connection reset")])
+    with pytest.raises(httpx.TransportError, match="connection reset"):
+        asyncio.run(c.post("https://x/jobs", json={}))
+
+
+def test_cloak_client_bad_json_is_a_value_error():
+    import pytest
+
+    from fleet.patches import _CloakResponse
+
+    with pytest.raises(ValueError):
+        _CloakResponse(200, "<html>", {}).json()
