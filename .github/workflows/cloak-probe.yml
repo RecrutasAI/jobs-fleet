@@ -1,0 +1,29 @@
+name: CloakBrowser probe
+
+# Measurement only, by hand: reads Meta and Tesla once with the CloakBrowser key and prints
+# counts (jobs, US, with description, seconds). Writes nothing. See tools/cloak_probe.py.
+on:
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: "Boards to read (space separated: meta tesla)"
+        default: "meta tesla"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - name: Probe
+        env:
+          CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
+        run: python tools/cloak_probe.py ${{ inputs.boards }}

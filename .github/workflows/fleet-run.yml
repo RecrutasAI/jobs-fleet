@@ -89,6 +89,7 @@ jobs:
         env:
           FLEET_ARTIFACT_KEY: ${{ secrets.FLEET_ARTIFACT_KEY }}
           FLEET_REGISTRY: ${{ runner.temp }}/boards.csv
+          CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}   # Meta and Tesla read through CloakBrowser
         run: |
           set -euo pipefail
           openssl enc -d -aes-256-cbc -pbkdf2 -pass env:FLEET_ARTIFACT_KEY -in registry.enc -out "$FLEET_REGISTRY"
